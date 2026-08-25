@@ -24,7 +24,7 @@ with sync_playwright() as p:
         timeout=60000
     )
 
-    # Zur Suchmaschine
+    # Suchmaschine
     link = page.get_by_text(
         "zu den Stellen im System Stella NRW",
         exact=False
@@ -33,7 +33,7 @@ with sync_playwright() as p:
     link.click()
     page.wait_for_load_state("networkidle", timeout=60000)
 
-    # Fachleiter-Bereich
+    # Fachleiter
     fachleiter = page.get_by_text(
         "Stellen an Zentren für schulpraktische Lehrerausbildung/Fachleiterausschreibung",
         exact=False
@@ -42,29 +42,39 @@ with sync_playwright() as p:
     fachleiter.click()
     page.wait_for_load_state("networkidle", timeout=60000)
 
-    print("Fachleiter-Suche geöffnet.")
-
-    # Fachleiter
+    # Suchkriterien
     page.locator("#artStelle").select_option("404")
-
-    # Studienseminar
     page.locator("#institution").select_option("92")
-
-    # NUR KÖLN
     page.locator("#ort").select_option("315000")
 
-    print("Suche: Fachleiter + Studienseminar + Köln")
-
-    # Suche starten
+    # Suche
     page.locator("input[name='button_suchen']").click()
 
     page.wait_for_load_state("networkidle", timeout=60000)
 
     print("\n========================================")
-    print("ERGEBNISSE FÜR KÖLN")
+    print("ERGEBNISSE")
     print("========================================")
 
     print("URL:", page.url)
+
+    # ALLE Links der Ergebnisse
+    print("\n--- LINKS IM ERGEBNIS ---")
+
+    for i, a in enumerate(page.locator("a").all()):
+        try:
+            text = a.inner_text().strip().replace("\n", " ")
+            href = a.get_attribute("href")
+
+            if text:
+                print(f"\nLINK {i}")
+                print("TEXT:", text)
+                print("HREF:", href)
+
+        except:
+            pass
+
+    print("\n--- KOMPLETTER TEXT ---")
 
     text = page.locator("body").inner_text()
 
