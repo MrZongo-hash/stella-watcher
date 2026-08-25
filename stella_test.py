@@ -1,3 +1,4 @@
+```python
 from playwright.sync_api import sync_playwright
 import json
 import os
@@ -10,6 +11,7 @@ from datetime import datetime
 # ============================================================
 
 BASE = "https://www.schulministerium.nrw.de"
+
 
 # ============================================================
 # TESTORT
@@ -24,6 +26,7 @@ BASE = "https://www.schulministerium.nrw.de"
 
 ORT_NAME = "Kleve"
 ORT_VALUE = "154036"
+
 
 # Datei mit bereits gemeldeten Stellen
 SEEN_FILE = "stella_bereits_gemeldet.json"
@@ -99,18 +102,31 @@ def load_seen():
 
 def save_seen(seen):
 
-    with open(
-        SEEN_FILE,
-        "w",
-        encoding="utf-8"
-    ) as f:
+    try:
 
-        json.dump(
-            seen,
-            f,
-            ensure_ascii=False,
-            indent=2
+        with open(
+            SEEN_FILE,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            json.dump(
+                seen,
+                f,
+                ensure_ascii=False,
+                indent=2
+            )
+
+        return True
+
+    except Exception as e:
+
+        print(
+            "FEHLER beim Speichern der Merkliste:",
+            e
         )
+
+        return False
 
 
 # ============================================================
@@ -339,39 +355,6 @@ def get_result_rows(page):
 
 
 # ============================================================
-# DETAILLINKS EINER ZEILE SUCHEN
-# ============================================================
-
-def get_detail_links_from_row(row):
-
-    links = []
-
-    anchors = row.locator("a")
-
-    for i in range(anchors.count()):
-
-        a = anchors.nth(i)
-
-        try:
-
-            text = a.inner_text().strip()
-            href = a.get_attribute("href")
-
-            if href:
-
-                links.append({
-                    "text": text,
-                    "href": href
-                })
-
-        except Exception:
-
-            pass
-
-    return links
-
-
-# ============================================================
 # DETAILSEITE ÖFFNEN
 # ============================================================
 
@@ -385,12 +368,15 @@ def read_detail_page(
     try:
 
         if href.startswith("http"):
+
             url = href
 
         elif href.startswith("/"):
+
             url = BASE + href
 
         else:
+
             url = BASE + "/" + href
 
         page.goto(
@@ -436,318 +422,350 @@ with sync_playwright() as p:
 
     page = context.new_page()
 
-    # --------------------------------------------------------
-    # Merkliste
-    # --------------------------------------------------------
+    try:
 
-    seen = load_seen()
+        # ----------------------------------------------------
+        # Merkliste
+        # ----------------------------------------------------
 
-    print()
-    print("========================================")
-    print("BEREITS BEKANNTE STELLEN")
-    print("========================================")
-
-    print(
-        "Anzahl:",
-        len(seen)
-    )
-
-    # --------------------------------------------------------
-    # STELLA
-    # --------------------------------------------------------
-
-    open_stella(page)
-
-    search_stella(page)
-
-    # --------------------------------------------------------
-    # Ergebnis
-    # --------------------------------------------------------
-
-    print()
-    print("========================================")
-    print(
-        f"ERGEBNISSE FÜR {ORT_NAME.upper()}"
-    )
-    print("========================================")
-
-    print(
-        "URL:",
-        page.url
-    )
-
-    # --------------------------------------------------------
-    # Ausschreibungen auslesen
-    # --------------------------------------------------------
-
-    results = get_result_rows(page)
-
-    print()
-    print(
-        "Gefundene Ausschreibungen:",
-        len(results)
-    )
-
-    # --------------------------------------------------------
-    # Ergebnisse prüfen
-    # --------------------------------------------------------
-
-    new_jobs = []
-
-    for index, result in enumerate(
-        results,
-        start=1
-    ):
+        seen = load_seen()
 
         print()
-        print("----------------------------------------")
-        print(
-            f"Prüfe Ausschreibung {index}/{len(results)}"
-        )
-        print("----------------------------------------")
-
-        result_text = result["text"]
-
-        # ----------------------------------------------------
-        # Sonderpädagogik prüfen
-        # ----------------------------------------------------
-
-        if not is_sonderpaedagogik(
-            result_text
-        ):
-
-            print(
-                "→ Keine Sonderpädagogik-Stelle"
-            )
-
-            continue
+        print("========================================")
+        print("BEREITS BEKANNTE STELLEN")
+        print("========================================")
 
         print(
-            "→ SONDERPÄDAGOGIK-STELLE GEFUNDEN"
+            "Anzahl:",
+            len(seen)
         )
 
         # ----------------------------------------------------
-        # ID
+        # STELLA
         # ----------------------------------------------------
 
-        job_id = create_job_id(
-            result_text
+        open_stella(page)
+
+        search_stella(page)
+
+        # ----------------------------------------------------
+        # Ergebnis
+        # ----------------------------------------------------
+
+        print()
+        print("========================================")
+        print(
+            f"ERGEBNISSE FÜR {ORT_NAME.upper()}"
         )
+        print("========================================")
 
         print(
-            "ID:",
-            job_id
+            "URL:",
+            page.url
         )
 
         # ----------------------------------------------------
-        # Bereits bekannt?
+        # Ausschreibungen auslesen
         # ----------------------------------------------------
 
-        if job_id in seen:
-
-            print(
-                "→ Bereits bekannt – keine erneute Meldung"
-            )
-
-            continue
-
-        # ----------------------------------------------------
-        # Detailseite suchen
-        # ----------------------------------------------------
-
-        # Wir versuchen, aus der Tabellenzeile
-        # den 'Weitere Hinweise'-Link zu bekommen.
-
-        # Dazu suchen wir erneut die passende Zeile.
-
-        detail_url = None
-
-        rows = page.locator("tr")
-
-        for r in range(rows.count()):
-
-            row = rows.nth(r)
-
-            try:
-
-                row_text = row.inner_text().strip()
-
-            except Exception:
-
-                continue
-
-            if job_id.lower() in row_text.lower():
-
-                anchors = row.locator("a")
-
-                for a_index in range(
-                    anchors.count()
-                ):
-
-                    a = anchors.nth(
-                        a_index
-                    )
-
-                    try:
-
-                        link_text = (
-                            a.inner_text()
-                            .strip()
-                        )
-
-                        href = (
-                            a.get_attribute(
-                                "href"
-                            )
-                        )
-
-                        if (
-                            "Weitere Hinweise"
-                            in link_text
-                            and href
-                        ):
-
-                            detail_url = (
-                                href
-                            )
-
-                            break
-
-                    except Exception:
-
-                        pass
-
-            if detail_url:
-                break
-
-        # ----------------------------------------------------
-        # Detailtext laden
-        # ----------------------------------------------------
-
-        detail_text = result_text
-
-        detail_page_url = page.url
-
-        if detail_url:
-
-            detail = read_detail_page(
-                context,
-                detail_url
-            )
-
-            if detail:
-
-                detail_text = detail["text"]
-                detail_page_url = detail["url"]
-
-        # ----------------------------------------------------
-        # Neue Stelle
-        # ----------------------------------------------------
-
-        print(
-            "→ NEUE STELLE!"
-        )
-
-        timestamp = datetime.now().isoformat(
-            timespec="seconds"
-        )
-
-        job_data = {
-
-            "id": job_id,
-
-            "url": detail_page_url,
-
-            "gefunden_am": timestamp,
-
-            "text": detail_text
-        }
-
-        new_jobs.append(
-            job_data
-        )
-
-        # ----------------------------------------------------
-        # Speichern
-        # ----------------------------------------------------
-
-        seen[job_id] = {
-
-            "url": detail_page_url,
-
-            "erstmals_gefunden": timestamp
-        }
-
-        save_seen(seen)
-
-    # ========================================================
-    # AUSGABE
-    # ========================================================
-
-    print()
-    print()
-    print("========================================")
-    print("NEUE SONDERPÄDAGOGIK-STELLEN")
-    print("========================================")
-
-    if not new_jobs:
+        results = get_result_rows(page)
 
         print()
         print(
-            "Keine neuen passenden Stellen gefunden."
+            "Gefundene Ausschreibungen:",
+            len(results)
         )
 
-    else:
+        # ----------------------------------------------------
+        # Ergebnisse prüfen
+        # ----------------------------------------------------
 
-        print()
-        print(
-            f"{len(new_jobs)} neue Stelle(n) gefunden!"
-        )
+        new_jobs = []
 
-        for i, job in enumerate(
-            new_jobs,
+        # Kopie der Merkliste.
+        # Änderungen werden erst nach erfolgreicher
+        # Verarbeitung dauerhaft gespeichert.
+        updated_seen = dict(seen)
+
+        for index, result in enumerate(
+            results,
             start=1
         ):
 
             print()
-            print("########################################")
+            print("----------------------------------------")
             print(
-                f"NEUE STELLE {i}"
+                f"Prüfe Ausschreibung {index}/{len(results)}"
             )
-            print("########################################")
+            print("----------------------------------------")
 
-            print()
+            result_text = result["text"]
+
+            # ------------------------------------------------
+            # Sonderpädagogik prüfen
+            # ------------------------------------------------
+
+            if not is_sonderpaedagogik(
+                result_text
+            ):
+
+                print(
+                    "→ Keine Sonderpädagogik-Stelle"
+                )
+
+                continue
+
+            print(
+                "→ SONDERPÄDAGOGIK-STELLE GEFUNDEN"
+            )
+
+            # ------------------------------------------------
+            # ID
+            # ------------------------------------------------
+
+            job_id = create_job_id(
+                result_text
+            )
+
             print(
                 "ID:",
-                job["id"]
+                job_id
             )
+
+            # ------------------------------------------------
+            # Bereits bekannt?
+            # ------------------------------------------------
+
+            if job_id in seen:
+
+                print(
+                    "→ Bereits bekannt – keine erneute Meldung"
+                )
+
+                continue
+
+            # ------------------------------------------------
+            # Detailseite suchen
+            # ------------------------------------------------
+
+            detail_url = None
+
+            rows = page.locator("tr")
+
+            for r in range(rows.count()):
+
+                row = rows.nth(r)
+
+                try:
+
+                    row_text = row.inner_text().strip()
+
+                except Exception:
+
+                    continue
+
+                if job_id.lower() in row_text.lower():
+
+                    anchors = row.locator("a")
+
+                    for a_index in range(
+                        anchors.count()
+                    ):
+
+                        a = anchors.nth(
+                            a_index
+                        )
+
+                        try:
+
+                            link_text = (
+                                a.inner_text()
+                                .strip()
+                            )
+
+                            href = (
+                                a.get_attribute(
+                                    "href"
+                                )
+                            )
+
+                            if (
+                                "Weitere Hinweise"
+                                in link_text
+                                and href
+                            ):
+
+                                detail_url = href
+
+                                break
+
+                        except Exception:
+
+                            pass
+
+                if detail_url:
+                    break
+
+            # ------------------------------------------------
+            # Detailtext laden
+            # ------------------------------------------------
+
+            detail_text = result_text
+
+            detail_page_url = page.url
+
+            if detail_url:
+
+                detail = read_detail_page(
+                    context,
+                    detail_url
+                )
+
+                if detail:
+
+                    detail_text = detail["text"]
+
+                    detail_page_url = detail["url"]
+
+            # ------------------------------------------------
+            # Neue Stelle
+            # ------------------------------------------------
+
+            print(
+                "→ NEUE STELLE!"
+            )
+
+            timestamp = datetime.now().isoformat(
+                timespec="seconds"
+            )
+
+            job_data = {
+
+                "id": job_id,
+
+                "url": detail_page_url,
+
+                "gefunden_am": timestamp,
+
+                "text": detail_text
+            }
+
+            new_jobs.append(
+                job_data
+            )
+
+            # Noch NICHT dauerhaft speichern.
+            updated_seen[job_id] = {
+
+                "url": detail_page_url,
+
+                "erstmals_gefunden": timestamp
+            }
+
+        # ----------------------------------------------------
+        # Neue Stellen dauerhaft speichern
+        # ----------------------------------------------------
+        #
+        # Für den jetzigen Test speichern wir die gefundenen
+        # neuen Stellen am Ende des erfolgreichen Durchlaufs.
+        #
+        # Später beim E-Mail-Versand ändern wir das so,
+        # dass erst nach erfolgreichem Versand gespeichert wird.
+        # ----------------------------------------------------
+
+        if new_jobs:
+
+            if save_seen(updated_seen):
+
+                print()
+                print(
+                    "Merkliste erfolgreich aktualisiert."
+                )
+
+            else:
+
+                print()
+                print(
+                    "WARNUNG: Merkliste konnte nicht gespeichert werden."
+                )
+
+        # ----------------------------------------------------
+        # AUSGABE
+        # ----------------------------------------------------
+
+        print()
+        print()
+        print("========================================")
+        print("NEUE SONDERPÄDAGOGIK-STELLEN")
+        print("========================================")
+
+        if not new_jobs:
 
             print()
             print(
-                "URL:",
-                job["url"]
+                "Keine neuen passenden Stellen gefunden."
             )
+
+        else:
 
             print()
             print(
-                "KOMPLETTER AUSSCHREIBUNGSTEXT:"
+                f"{len(new_jobs)} neue Stelle(n) gefunden!"
             )
 
-            print("----------------------------------------")
+            for i, job in enumerate(
+                new_jobs,
+                start=1
+            ):
 
-            print(
-                job["text"]
-            )
+                print()
+                print("########################################")
+                print(
+                    f"NEUE STELLE {i}"
+                )
+                print("########################################")
 
-            print("----------------------------------------")
+                print()
+                print(
+                    "ID:",
+                    job["id"]
+                )
 
-    # ========================================================
-    # ENDE
-    # ========================================================
+                print()
+                print(
+                    "URL:",
+                    job["url"]
+                )
 
-    print()
-    print("========================================")
-    print("CHECK BEENDET")
-    print("========================================")
+                print()
+                print(
+                    "KOMPLETTER AUSSCHREIBUNGSTEXT:"
+                )
 
-    browser.close()
+                print("----------------------------------------")
+
+                print(
+                    job["text"]
+                )
+
+                print("----------------------------------------")
+
+    except Exception as e:
+
+        print()
+        print("========================================")
+        print("FEHLER BEIM AUSFÜHREN DES MONITORS")
+        print("========================================")
+        print(e)
+
+        raise
+
+    finally:
+
+        browser.close()
+
+        print()
+        print("========================================")
+        print("CHECK BEENDET")
+        print("========================================")
+```
