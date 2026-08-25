@@ -1,4 +1,3 @@
-
 from playwright.sync_api import sync_playwright
 import json
 import os
@@ -358,10 +357,7 @@ def get_result_rows(page):
 # DETAILSEITE ÖFFNEN
 # ============================================================
 
-def read_detail_page(
-    context,
-    href
-):
+def read_detail_page(context, href):
 
     page = context.new_page()
 
@@ -485,6 +481,7 @@ with sync_playwright() as p:
         # Kopie der Merkliste.
         # Änderungen werden erst nach erfolgreicher
         # Verarbeitung dauerhaft gespeichert.
+
         updated_seen = dict(seen)
 
         for index, result in enumerate(
@@ -654,7 +651,7 @@ with sync_playwright() as p:
                 job_data
             )
 
-            # Noch NICHT dauerhaft speichern.
+            # Noch nicht in die echte Merkliste schreiben.
             updated_seen[job_id] = {
 
                 "url": detail_page_url,
@@ -663,14 +660,7 @@ with sync_playwright() as p:
             }
 
         # ----------------------------------------------------
-        # Neue Stellen dauerhaft speichern
-        # ----------------------------------------------------
-        #
-        # Für den jetzigen Test speichern wir die gefundenen
-        # neuen Stellen am Ende des erfolgreichen Durchlaufs.
-        #
-        # Später beim E-Mail-Versand ändern wir das so,
-        # dass erst nach erfolgreichem Versand gespeichert wird.
+        # MERKLISTE SPEICHERN
         # ----------------------------------------------------
 
         if new_jobs:
@@ -756,7 +746,11 @@ with sync_playwright() as p:
         print("========================================")
         print("FEHLER BEIM AUSFÜHREN DES MONITORS")
         print("========================================")
-        print(e)
+
+        print(
+            type(e).__name__ + ":",
+            e
+        )
 
         raise
 
@@ -768,4 +762,3 @@ with sync_playwright() as p:
         print("========================================")
         print("CHECK BEENDET")
         print("========================================")
-```
