@@ -1,8 +1,15 @@
 from playwright.sync_api import sync_playwright
 
 BASE = "https://www.schulministerium.nrw.de"
-START_URL = BASE + "/BiPo/Stella/online?action=18.747518507714723&block=50&suchid=18143&stellenart=4_0"
 
+START_URL = (
+    BASE
+    + "/BiPo/Stella/online"
+    + "?action=18.747518507714723"
+    + "&block=50"
+    + "&suchid=18143"
+    + "&stellenart=4_0"
+)
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
@@ -10,7 +17,12 @@ with sync_playwright() as p:
     page = context.new_page()
 
     print("Öffne STELLA...")
-    page.goto(START_URL, wait_until="networkidle", timeout=60000)
+
+    page.goto(
+        START_URL,
+        wait_until="networkidle",
+        timeout=60000
+    )
 
     # Zur Suchmaschine
     link = page.get_by_text(
@@ -30,69 +42,32 @@ with sync_playwright() as p:
     fachleiter.click()
     page.wait_for_load_state("networkidle", timeout=60000)
 
-    print("\n--- FACHLEITER-SUCHMASKE ---")
+    print("Fachleiter-Suche geöffnet.")
+
+    # Fachleiter
+    page.locator("#artStelle").select_option("404")
+
+    # Studienseminar
+    page.locator("#institution").select_option("92")
+
+    # NUR KÖLN
+    page.locator("#ort").select_option("315000")
+
+    print("Suche: Fachleiter + Studienseminar + Köln")
+
+    # Suche starten
+    page.locator("input[name='button_suchen']").click()
+
+    page.wait_for_load_state("networkidle", timeout=60000)
+
+    print("\n========================================")
+    print("ERGEBNISSE FÜR KÖLN")
+    print("========================================")
+
     print("URL:", page.url)
 
-    # Alle Select-Felder untersuchen
-    print("\n--- AUSWAHLMENÜS (SELECT) ---")
+    text = page.locator("body").inner_text()
 
-    selects = page.locator("select")
-
-    print("Anzahl Selects:", selects.count())
-
-    for i in range(selects.count()):
-        select = selects.nth(i)
-
-        print(f"\nSELECT {i}")
-        print("Name:", select.get_attribute("name"))
-        print("ID:", select.get_attribute("id"))
-
-        options = select.locator("option")
-
-        for j in range(options.count()):
-            option = options.nth(j)
-
-            text = option.inner_text().strip()
-            value = option.get_attribute("value")
-
-            print(f"  OPTION {j}: {text} | VALUE: {value}")
-
-    # Alle Eingabefelder untersuchen
-    print("\n--- INPUT-FELDER ---")
-
-    inputs = page.locator("input")
-
-    print("Anzahl Inputs:", inputs.count())
-
-    for i in range(inputs.count()):
-        inp = inputs.nth(i)
-
-        print(
-            f"INPUT {i}: "
-            f"type={inp.get_attribute('type')} | "
-            f"name={inp.get_attribute('name')} | "
-            f"id={inp.get_attribute('id')} | "
-            f"value={inp.get_attribute('value')}"
-        )
-
-    # Buttons
-    print("\n--- BUTTONS ---")
-
-    buttons = page.locator("button, input[type='submit'], input[type='button']")
-
-    print("Anzahl Buttons:", buttons.count())
-
-    for i in range(buttons.count()):
-        button = buttons.nth(i)
-
-        print(
-            f"BUTTON {i}: "
-            f"text={button.inner_text().strip()} | "
-            f"type={button.get_attribute('type')} | "
-            f"name={button.get_attribute('name')} | "
-            f"value={button.get_attribute('value')}"
-        )
-
-    print("\n--- TEST ENDE ---")
+    print(text[:50000])
 
     browser.close()
