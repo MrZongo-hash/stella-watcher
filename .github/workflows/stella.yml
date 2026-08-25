@@ -10,11 +10,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: STELLA aufrufen
-        run: |
-          echo "STELLA-Wächter läuft"
-          echo "Noch keine echte Prüfung – Test erfolgreich."
+      - name: Repository auschecken
+        uses: actions/checkout@v4
 
-      - name: Ergebnis anzeigen
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Playwright installieren
         run: |
-          echo "Prüfung abgeschlossen."
+          pip install playwright
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: STELLA testen
+        run: python stella_test.py
