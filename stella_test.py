@@ -11,23 +11,21 @@ from datetime import datetime
 
 BASE = "https://www.schulministerium.nrw.de"
 
-# ------------------------------------------------------------
+# ============================================================
 # TESTORT
-# ------------------------------------------------------------
-# Zum Testen: Kleve
-# Später für den normalen Betrieb auf Köln ändern:
+# ============================================================
+# Zunächst Kleve zum Testen.
 #
-# KÖLN: 315000
-# KLEVE: 154036
-# ------------------------------------------------------------
+# Wenn alles funktioniert:
+#
+# ORT_NAME = "Köln"
+# ORT_VALUE = "315000"
+# ============================================================
 
 ORT_NAME = "Kleve"
 ORT_VALUE = "154036"
 
-# ------------------------------------------------------------
-# Datei, in der bereits gemeldete Stellen gespeichert werden
-# ------------------------------------------------------------
-
+# Datei mit bereits gemeldeten Stellen
 SEEN_FILE = "stella_bereits_gemeldet.json"
 
 
@@ -46,41 +44,67 @@ START_URL = (
 
 
 # ============================================================
-# SCHLÜSSELWÖRTER FÜR SONDERPÄDAGOGIK
+# SCHLÜSSELWÖRTER
 # ============================================================
 
 SONDERPAEDAGOGIK_KEYWORDS = [
     "sonderpädagogische förderung",
-    "sonderpädagogik",
     "sonderpädagogischen förderung",
+    "sonderpädagogik",
+    "sonderpädagogischen",
     "lehramt für sonderpädagogische förderung",
     "lehramt für sonderpädagogik",
+    "seminar für das lehramt für sonderpädagogische förderung",
+    "seminar für das lehramt für sonderpädagogik",
 ]
 
 
 # ============================================================
-# DATEI MIT BEREITS GEMELDETEN STELLEN LADEN
+# MERKLISTE LADEN
 # ============================================================
 
 def load_seen():
+
     if not os.path.exists(SEEN_FILE):
         return {}
 
     try:
-        with open(SEEN_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+
+        with open(
+            SEEN_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            data = json.load(f)
+
+            if isinstance(data, dict):
+                return data
+
+            return {}
 
     except Exception as e:
-        print("Fehler beim Laden der Merkliste:", e)
+
+        print(
+            "Fehler beim Laden der Merkliste:",
+            e
+        )
+
         return {}
 
 
 # ============================================================
-# DATEI MIT BEREITS GEMELDETEN STELLEN SPEICHERN
+# MERKLISTE SPEICHERN
 # ============================================================
 
 def save_seen(seen):
-    with open(SEEN_FILE, "w", encoding="utf-8") as f:
+
+    with open(
+        SEEN_FILE,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
         json.dump(
             seen,
             f,
@@ -90,7 +114,7 @@ def save_seen(seen):
 
 
 # ============================================================
-# PRÜFEN, OB EINE STELLE ZU SONDERPÄDAGOGIK PASST
+# SONDERPÄDAGOGIK ERKENNEN
 # ============================================================
 
 def is_sonderpaedagogik(text):
@@ -98,6 +122,7 @@ def is_sonderpaedagogik(text):
     text_lower = text.lower()
 
     for keyword in SONDERPAEDAGOGIK_KEYWORDS:
+
         if keyword in text_lower:
             return True
 
@@ -105,39 +130,64 @@ def is_sonderpaedagogik(text):
 
 
 # ============================================================
-# EINE STABILE ID FÜR EINE STELLE ERZEUGEN
+# AKTENZEICHEN SUCHEN
+# ============================================================
+
+def extract_aktenzeichen(text):
+
+    patterns = [
+
+        # z.B. 47.Z-FL4206A
+        r"\b\d+\.[A-Z]-FL\d+[A-Z]?\b",
+
+        # etwas großzügiger
+        r"\b\d+\.[A-Z]+-FL\d+[A-Z]?\b",
+    ]
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            text,
+            re.IGNORECASE
+        )
+
+        if match:
+            return match.group(0)
+
+    return None
+
+
+# ============================================================
+# STABILE ID ERZEUGEN
 # ============================================================
 
 def create_job_id(text):
 
-    # Zuerst versuchen wir das Aktenzeichen zu finden.
-    #
-    # Beispiele:
-    # 47.Z-FL4110A
-    # 47.Z-FL4206A
-    # 47.Z-FL4237A
+    aktenzeichen = extract_aktenzeichen(text)
 
-    match = re.search(
-        r"\b\d+\.[A-Z]-FL\d+[A-Z]?\b",
-        text
+    if aktenzeichen:
+
+        return aktenzeichen.upper()
+
+    # Falls aus irgendeinem Grund kein Aktenzeichen
+    # gefunden wird, erzeugen wir eine Ersatz-ID.
+
+    normalized = " ".join(
+        text.split()
     )
 
-    if match:
-        return match.group(0)
-
-    # Falls kein Aktenzeichen gefunden wird,
-    # verwenden wir den gesamten Text als Grundlage.
-
-    normalized = " ".join(text.split())
-
-    return normalized[:500]
+    return (
+        "NO_AKTENZEICHEN_"
+        + normalized[:300]
+    )
 
 
 # ============================================================
-# STELLA ÖFFNEN UND SUCHE DURCHFÜHREN
+# STELLA ÖFFNEN
 # ============================================================
 
-def search_stella(page):
+def open_stella(page):
 
     print("Öffne STELLA...")
 
@@ -150,7 +200,7 @@ def search_stella(page):
     print("Startseite geladen.")
 
     # --------------------------------------------------------
-    # Zur Suchmaschine
+    # Suchmaschine
     # --------------------------------------------------------
 
     link = page.get_by_text(
@@ -168,7 +218,7 @@ def search_stella(page):
     print("Suchmaschine geöffnet.")
 
     # --------------------------------------------------------
-    # Fachleiter-Bereich
+    # Fachleiter
     # --------------------------------------------------------
 
     fachleiter = page.get_by_text(
@@ -185,26 +235,32 @@ def search_stella(page):
 
     print("Fachleiter-Suche geöffnet.")
 
-    # --------------------------------------------------------
-    # Suchkriterien
-    # --------------------------------------------------------
+
+# ============================================================
+# SUCHE DURCHFÜHREN
+# ============================================================
+
+def search_stella(page):
 
     # Fachleiter/-in
-    page.locator("#artStelle").select_option("404")
+    page.locator(
+        "#artStelle"
+    ).select_option("404")
 
     # Studienseminar
-    page.locator("#institution").select_option("92")
+    page.locator(
+        "#institution"
+    ).select_option("92")
 
     # Ort
-    page.locator("#ort").select_option(ORT_VALUE)
+    page.locator(
+        "#ort"
+    ).select_option(ORT_VALUE)
 
+    print()
     print(
         f"Suche: Fachleiter + Studienseminar + {ORT_NAME}"
     )
-
-    # --------------------------------------------------------
-    # Suche starten
-    # --------------------------------------------------------
 
     page.locator(
         "input[name='button_suchen']"
@@ -217,75 +273,125 @@ def search_stella(page):
 
     print("Suche abgeschlossen.")
 
-    return page
-
 
 # ============================================================
-# STELLEN AUF DER ERGEBNISSEITE AUSLESEN
+# ERGEBNISSE AUSLESEN
 # ============================================================
 
-def get_job_links(page):
+def get_result_rows(page):
 
-    jobs = []
+    """
+    Liest die Ausschreibungen aus der Ergebnis-Tabelle.
 
-    links = page.locator("a")
+    Wir suchen dabei nicht nach 'Weitere Hinweise',
+    sondern nach Tabellenzeilen, damit die komplette
+    Ausschreibung zusammenbleibt.
+    """
 
-    for i in range(links.count()):
+    rows = page.locator("tr")
 
-        a = links.nth(i)
+    results = []
+
+    count = rows.count()
+
+    print()
+    print(
+        "Gefundene Tabellenzeilen:",
+        count
+    )
+
+    for i in range(count):
+
+        row = rows.nth(i)
 
         try:
+
+            text = row.inner_text().strip()
+
+        except Exception:
+
+            continue
+
+        if not text:
+            continue
+
+        text_lower = text.lower()
+
+        # ----------------------------------------------------
+        # Nur relevante Ausschreibungszeilen
+        # ----------------------------------------------------
+
+        if (
+            "fachleiter" not in text_lower
+            and "fachleiter/-in" not in text_lower
+        ):
+            continue
+
+        # Kopfzeile ignorieren
+        if "stellenbezeichnung" in text_lower:
+            continue
+
+        results.append({
+            "text": text
+        })
+
+    return results
+
+
+# ============================================================
+# DETAILLINKS EINER ZEILE SUCHEN
+# ============================================================
+
+def get_detail_links_from_row(row):
+
+    links = []
+
+    anchors = row.locator("a")
+
+    for i in range(anchors.count()):
+
+        a = anchors.nth(i)
+
+        try:
+
             text = a.inner_text().strip()
             href = a.get_attribute("href")
 
-            if not text or not href:
-                continue
+            if href:
 
-            # Wir interessieren uns für
-            # "Weitere Hinweise"-Links.
-            #
-            # Bei STELLA führen diese zu den Detailinformationen
-            # der jeweiligen Stelle.
-
-            if "Weitere Hinweise" in text:
-
-                jobs.append({
+                links.append({
                     "text": text,
                     "href": href
                 })
 
         except Exception:
+
             pass
 
-    return jobs
+    return links
 
 
 # ============================================================
-# ABSOLUTEN LINK ERZEUGEN
+# DETAILSEITE ÖFFNEN
 # ============================================================
 
-def make_absolute_url(href):
-
-    if href.startswith("http"):
-        return href
-
-    if href.startswith("/"):
-        return BASE + href
-
-    return BASE + "/" + href
-
-
-# ============================================================
-# STELLENDETAILS AUSLESEN
-# ============================================================
-
-def read_job_detail(context, href):
+def read_detail_page(
+    context,
+    href
+):
 
     page = context.new_page()
 
     try:
 
-        url = make_absolute_url(href)
+        if href.startswith("http"):
+            url = href
+
+        elif href.startswith("/"):
+            url = BASE + href
+
+        else:
+            url = BASE + "/" + href
 
         page.goto(
             url,
@@ -293,7 +399,9 @@ def read_job_detail(context, href):
             timeout=60000
         )
 
-        text = page.locator("body").inner_text()
+        text = page.locator(
+            "body"
+        ).inner_text()
 
         return {
             "url": page.url,
@@ -303,7 +411,7 @@ def read_job_detail(context, href):
     except Exception as e:
 
         print(
-            "Fehler beim Lesen der Stelle:",
+            "Fehler beim Öffnen der Detailseite:",
             e
         )
 
@@ -329,7 +437,7 @@ with sync_playwright() as p:
     page = context.new_page()
 
     # --------------------------------------------------------
-    # Bereits bekannte Stellen laden
+    # Merkliste
     # --------------------------------------------------------
 
     seen = load_seen()
@@ -345,18 +453,22 @@ with sync_playwright() as p:
     )
 
     # --------------------------------------------------------
-    # STELLA SUCHE
+    # STELLA
     # --------------------------------------------------------
+
+    open_stella(page)
 
     search_stella(page)
 
     # --------------------------------------------------------
-    # Ergebnisübersicht
+    # Ergebnis
     # --------------------------------------------------------
 
     print()
     print("========================================")
-    print(f"ERGEBNISSE FÜR {ORT_NAME.upper()}")
+    print(
+        f"ERGEBNISSE FÜR {ORT_NAME.upper()}"
+    )
     print("========================================")
 
     print(
@@ -365,47 +477,44 @@ with sync_playwright() as p:
     )
 
     # --------------------------------------------------------
-    # Stellenlinks finden
+    # Ausschreibungen auslesen
     # --------------------------------------------------------
 
-    jobs = get_job_links(page)
+    results = get_result_rows(page)
 
     print()
     print(
         "Gefundene Ausschreibungen:",
-        len(jobs)
+        len(results)
     )
 
     # --------------------------------------------------------
-    # Jede Ausschreibung untersuchen
+    # Ergebnisse prüfen
     # --------------------------------------------------------
 
     new_jobs = []
 
-    for index, job in enumerate(jobs, start=1):
+    for index, result in enumerate(
+        results,
+        start=1
+    ):
 
         print()
         print("----------------------------------------")
         print(
-            f"Prüfe Ausschreibung {index}/{len(jobs)}"
+            f"Prüfe Ausschreibung {index}/{len(results)}"
         )
         print("----------------------------------------")
 
-        detail = read_job_detail(
-            context,
-            job["href"]
-        )
-
-        if not detail:
-            continue
-
-        text = detail["text"]
+        result_text = result["text"]
 
         # ----------------------------------------------------
-        # Sonderpädagogik-Filter
+        # Sonderpädagogik prüfen
         # ----------------------------------------------------
 
-        if not is_sonderpaedagogik(text):
+        if not is_sonderpaedagogik(
+            result_text
+        ):
 
             print(
                 "→ Keine Sonderpädagogik-Stelle"
@@ -418,10 +527,12 @@ with sync_playwright() as p:
         )
 
         # ----------------------------------------------------
-        # ID erzeugen
+        # ID
         # ----------------------------------------------------
 
-        job_id = create_job_id(text)
+        job_id = create_job_id(
+            result_text
+        )
 
         print(
             "ID:",
@@ -429,7 +540,7 @@ with sync_playwright() as p:
         )
 
         # ----------------------------------------------------
-        # Bereits gemeldet?
+        # Bereits bekannt?
         # ----------------------------------------------------
 
         if job_id in seen:
@@ -441,6 +552,95 @@ with sync_playwright() as p:
             continue
 
         # ----------------------------------------------------
+        # Detailseite suchen
+        # ----------------------------------------------------
+
+        # Wir versuchen, aus der Tabellenzeile
+        # den 'Weitere Hinweise'-Link zu bekommen.
+
+        # Dazu suchen wir erneut die passende Zeile.
+
+        detail_url = None
+
+        rows = page.locator("tr")
+
+        for r in range(rows.count()):
+
+            row = rows.nth(r)
+
+            try:
+
+                row_text = row.inner_text().strip()
+
+            except Exception:
+
+                continue
+
+            if job_id.lower() in row_text.lower():
+
+                anchors = row.locator("a")
+
+                for a_index in range(
+                    anchors.count()
+                ):
+
+                    a = anchors.nth(
+                        a_index
+                    )
+
+                    try:
+
+                        link_text = (
+                            a.inner_text()
+                            .strip()
+                        )
+
+                        href = (
+                            a.get_attribute(
+                                "href"
+                            )
+                        )
+
+                        if (
+                            "Weitere Hinweise"
+                            in link_text
+                            and href
+                        ):
+
+                            detail_url = (
+                                href
+                            )
+
+                            break
+
+                    except Exception:
+
+                        pass
+
+            if detail_url:
+                break
+
+        # ----------------------------------------------------
+        # Detailtext laden
+        # ----------------------------------------------------
+
+        detail_text = result_text
+
+        detail_page_url = page.url
+
+        if detail_url:
+
+            detail = read_detail_page(
+                context,
+                detail_url
+            )
+
+            if detail:
+
+                detail_text = detail["text"]
+                detail_page_url = detail["url"]
+
+        # ----------------------------------------------------
         # Neue Stelle
         # ----------------------------------------------------
 
@@ -448,33 +648,40 @@ with sync_playwright() as p:
             "→ NEUE STELLE!"
         )
 
+        timestamp = datetime.now().isoformat(
+            timespec="seconds"
+        )
+
         job_data = {
+
             "id": job_id,
-            "url": detail["url"],
-            "gefunden_am": datetime.now().isoformat(
-                timespec="seconds"
-            ),
-            "text": text
+
+            "url": detail_page_url,
+
+            "gefunden_am": timestamp,
+
+            "text": detail_text
         }
 
-        new_jobs.append(job_data)
+        new_jobs.append(
+            job_data
+        )
 
         # ----------------------------------------------------
-        # Sofort in Merkliste eintragen
+        # Speichern
         # ----------------------------------------------------
-        #
-        # Dadurch wird die Stelle nicht bei einem weiteren
-        # Durchlauf erneut als neu erkannt.
 
         seen[job_id] = {
-            "url": detail["url"],
-            "erstmals_gefunden": job_data["gefunden_am"]
+
+            "url": detail_page_url,
+
+            "erstmals_gefunden": timestamp
         }
 
         save_seen(seen)
 
     # ========================================================
-    # ERGEBNIS
+    # AUSGABE
     # ========================================================
 
     print()
@@ -527,7 +734,11 @@ with sync_playwright() as p:
             )
 
             print("----------------------------------------")
-            print(job["text"])
+
+            print(
+                job["text"]
+            )
+
             print("----------------------------------------")
 
     # ========================================================
