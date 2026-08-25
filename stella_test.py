@@ -3,6 +3,7 @@ from playwright.sync_api import sync_playwright
 BASE = "https://www.schulministerium.nrw.de"
 START_URL = BASE + "/BiPo/Stella/online?action=18.747518507714723&block=50&suchid=18143&stellenart=4_0"
 
+
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     context = browser.new_context()
@@ -11,61 +12,87 @@ with sync_playwright() as p:
     print("Öffne STELLA...")
     page.goto(START_URL, wait_until="networkidle", timeout=60000)
 
-    print("Startseite geladen.")
-
-    # Zum Suchmaschinen-Bereich
+    # Zur Suchmaschine
     link = page.get_by_text(
         "zu den Stellen im System Stella NRW",
         exact=False
     ).first
 
-    print("Klicke auf: zu den Stellen im System Stella NRW")
     link.click()
     page.wait_for_load_state("networkidle", timeout=60000)
 
-    print("Suchmaschinen-Seite:", page.url)
-
-    # Alle Links dieser Seite ausgeben
-    print("\n--- LINKS DER SUCHMASCHINE ---")
-
-    for link in page.locator("a").all():
-        try:
-            text = link.inner_text().strip().replace("\n", " ")
-            href = link.get_attribute("href")
-
-            if text:
-                print(f"TEXT: {text}")
-                print(f"HREF: {href}")
-                print()
-        except:
-            pass
-
-    # Den Fachleiter-Bereich anklicken
+    # Fachleiter-Bereich
     fachleiter = page.get_by_text(
         "Stellen an Zentren für schulpraktische Lehrerausbildung/Fachleiterausschreibung",
         exact=False
     ).first
 
-    print("--- FACHLEITER-BEREICH ---")
-    print("Gefunden:", fachleiter.count())
+    fachleiter.click()
+    page.wait_for_load_state("networkidle", timeout=60000)
 
-    if fachleiter.count() > 0:
-        print("HREF:", fachleiter.get_attribute("href"))
+    print("\n--- FACHLEITER-SUCHMASKE ---")
+    print("URL:", page.url)
 
-        fachleiter.click()
-        page.wait_for_load_state("networkidle", timeout=60000)
+    # Alle Select-Felder untersuchen
+    print("\n--- AUSWAHLMENÜS (SELECT) ---")
 
-        print("\n--- FACHLEITER-SUCHE ---")
-        print("URL:", page.url)
-        print("Titel:", page.title())
+    selects = page.locator("select")
 
-        text = page.locator("body").inner_text()
+    print("Anzahl Selects:", selects.count())
 
-        print("\n--- INHALT ---")
-        print(text[:30000])
-        print("--- ENDE ---")
+    for i in range(selects.count()):
+        select = selects.nth(i)
 
-    else:
-        print("Fachleiter-Bereich nicht gefunden!")
+        print(f"\nSELECT {i}")
+        print("Name:", select.get_attribute("name"))
+        print("ID:", select.get_attribute("id"))
+
+        options = select.locator("option")
+
+        for j in range(options.count()):
+            option = options.nth(j)
+
+            text = option.inner_text().strip()
+            value = option.get_attribute("value")
+
+            print(f"  OPTION {j}: {text} | VALUE: {value}")
+
+    # Alle Eingabefelder untersuchen
+    print("\n--- INPUT-FELDER ---")
+
+    inputs = page.locator("input")
+
+    print("Anzahl Inputs:", inputs.count())
+
+    for i in range(inputs.count()):
+        inp = inputs.nth(i)
+
+        print(
+            f"INPUT {i}: "
+            f"type={inp.get_attribute('type')} | "
+            f"name={inp.get_attribute('name')} | "
+            f"id={inp.get_attribute('id')} | "
+            f"value={inp.get_attribute('value')}"
+        )
+
+    # Buttons
+    print("\n--- BUTTONS ---")
+
+    buttons = page.locator("button, input[type='submit'], input[type='button']")
+
+    print("Anzahl Buttons:", buttons.count())
+
+    for i in range(buttons.count()):
+        button = buttons.nth(i)
+
+        print(
+            f"BUTTON {i}: "
+            f"text={button.inner_text().strip()} | "
+            f"type={button.get_attribute('type')} | "
+            f"name={button.get_attribute('name')} | "
+            f"value={button.get_attribute('value')}"
+        )
+
+    print("\n--- TEST ENDE ---")
 
     browser.close()
