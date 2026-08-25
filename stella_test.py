@@ -12,44 +12,60 @@ with sync_playwright() as p:
     page.goto(START_URL, wait_until="networkidle", timeout=60000)
 
     print("Startseite geladen.")
-    
-    print("\n--- COOKIES ---")
-    for cookie in context.cookies():
-        print(
-            "Name:", cookie["name"],
-            "| Domain:", cookie["domain"],
-            "| Path:", cookie["path"]
-        )
 
-    print("\n--- STELLA-LINK ---")
+    # Zum Suchmaschinen-Bereich
     link = page.get_by_text(
         "zu den Stellen im System Stella NRW",
         exact=False
     ).first
 
-    print("Anzahl gefundener Links:", link.count())
+    print("Klicke auf: zu den Stellen im System Stella NRW")
+    link.click()
+    page.wait_for_load_state("networkidle", timeout=60000)
 
-    if link.count() == 0:
-        print("FEHLER: Stellen-Link nicht gefunden!")
-    else:
-        print("Link gefunden.")
-        print("HREF:", link.get_attribute("href"))
-        print("TARGET:", link.get_attribute("target"))
+    print("Suchmaschinen-Seite:", page.url)
 
-        print("\nKlicke den Link wie ein normaler Benutzer...")
+    # Alle Links dieser Seite ausgeben
+    print("\n--- LINKS DER SUCHMASCHINE ---")
 
-        link.click()
+    for link in page.locator("a").all():
+        try:
+            text = link.inner_text().strip().replace("\n", " ")
+            href = link.get_attribute("href")
 
-        # Kurz warten, damit STELLA reagieren kann
-        page.wait_for_timeout(5000)
+            if text:
+                print(f"TEXT: {text}")
+                print(f"HREF: {href}")
+                print()
+        except:
+            pass
 
-        print("\n--- NACH DEM KLICK ---")
+    # Den Fachleiter-Bereich anklicken
+    fachleiter = page.get_by_text(
+        "Stellen an Zentren für schulpraktische Lehrerausbildung/Fachleiterausschreibung",
+        exact=False
+    ).first
+
+    print("--- FACHLEITER-BEREICH ---")
+    print("Gefunden:", fachleiter.count())
+
+    if fachleiter.count() > 0:
+        print("HREF:", fachleiter.get_attribute("href"))
+
+        fachleiter.click()
+        page.wait_for_load_state("networkidle", timeout=60000)
+
+        print("\n--- FACHLEITER-SUCHE ---")
         print("URL:", page.url)
         print("Titel:", page.title())
 
-        print("\n--- SEITENINHALT ---")
         text = page.locator("body").inner_text()
+
+        print("\n--- INHALT ---")
         print(text[:30000])
         print("--- ENDE ---")
+
+    else:
+        print("Fachleiter-Bereich nicht gefunden!")
 
     browser.close()
