@@ -2,6 +2,9 @@ from playwright.sync_api import sync_playwright
 import json
 import os
 import re
+import smtplib
+import base64
+from email.message import EmailMessage
 from datetime import datetime
 
 
@@ -11,17 +14,15 @@ from datetime import datetime
 
 BASE = "https://www.schulministerium.nrw.de"
 
-
-# ============================================================
+# ------------------------------------------------------------
 # TESTORT
-# ============================================================
+# ------------------------------------------------------------
 # Zunächst Kleve zum Testen.
 #
-# Wenn alles funktioniert:
-#
+# Später:
 # ORT_NAME = "Köln"
 # ORT_VALUE = "315000"
-# ============================================================
+# ------------------------------------------------------------
 
 ORT_NAME = "Kleve"
 ORT_VALUE = "154036"
@@ -29,6 +30,14 @@ ORT_VALUE = "154036"
 
 # Datei mit bereits gemeldeten Stellen
 SEEN_FILE = "stella_bereits_gemeldet.json"
+
+
+# ============================================================
+# E-MAIL / FREEnet
+# ============================================================
+
+SMTP_SERVER = "mx.freenet.de"
+SMTP_PORT = 587
 
 
 # ============================================================
@@ -185,9 +194,6 @@ def create_job_id(text):
 
         return aktenzeichen.upper()
 
-    # Falls aus irgendeinem Grund kein Aktenzeichen
-    # gefunden wird, erzeugen wir eine Ersatz-ID.
-
     normalized = " ".join(
         text.split()
     )
@@ -295,14 +301,6 @@ def search_stella(page):
 
 def get_result_rows(page):
 
-    """
-    Liest die Ausschreibungen aus der Ergebnis-Tabelle.
-
-    Wir suchen dabei nicht nach 'Weitere Hinweise',
-    sondern nach Tabellenzeilen, damit die komplette
-    Ausschreibung zusammenbleibt.
-    """
-
     rows = page.locator("tr")
 
     results = []
@@ -332,17 +330,12 @@ def get_result_rows(page):
 
         text_lower = text.lower()
 
-        # ----------------------------------------------------
-        # Nur relevante Ausschreibungszeilen
-        # ----------------------------------------------------
-
         if (
             "fachleiter" not in text_lower
             and "fachleiter/-in" not in text_lower
         ):
             continue
 
-        # Kopfzeile ignorieren
         if "stellenbezeichnung" in text_lower:
             continue
 
@@ -405,6 +398,207 @@ def read_detail_page(context, href):
 
 
 # ============================================================
+# E-MAIL VERSENDEN
+# ============================================================
+
+def send_email(job):
+
+    sender = os.environ["FREENET_EMAIL"]
+    password = os.environ["FREENET_PASSWORD"]
+    recipient = os.environ["MAIL_TO"]
+
+    print()
+    print("========================================")
+    print("VERSENDE E-MAIL")
+    print("========================================")
+
+    msg = EmailMessage()
+
+    msg["From"] = sender
+    msg["To"] = recipient
+
+    msg["Subject"] = (
+        "Neue STELLA-Stelle – "
+        f"Fachleitung Sonderpädagogik – {ORT_NAME}"
+    )
+
+    email_text = (
+        "Eine neue passende Ausschreibung wurde gefunden.\n\n"
+        "========================================\n"
+        "STELLA MONITOR\n"
+        "========================================\n\n"
+
+        f"Ort: {ORT_NAME}\n"
+        f"Aktenzeichen: {job['id']}\n"
+        f"Gefunden am: {job['gefunden_am']}\n\n"
+
+        "DETAILSEITE:\n"
+        f"{job['url']}\n\n"
+
+        "========================================\n"
+        "AUSSCHREIBUNGSTEXT\n"
+        "========================================\n\n"
+
+        f"{job['text']}\n"
+    )
+
+    msg.set_content(email_text)
+
+    server = smtplib.SMTP(
+        SMTP_SERVER,
+        SMTP_PORT,
+        timeout=30
+    )
+
+    try:
+
+        print("EHLO...")
+        code, response = server.ehlo()
+        print(code, response)
+
+        print("STARTTLS...")
+        code, response = server.starttls()
+        print(code, response)
+
+        print("EHLO nach TLS...")
+        code, response = server.ehlo()
+        print(code, response)
+
+        # ----------------------------------------------------
+        # AUTH LOGIN
+        # ----------------------------------------------------
+
+        print("Login...")
+
+        code, response = server.docmd(
+            "AUTH",
+            "LOGIN"
+        )
+
+        print(code, response)
+
+        if code != 334:
+
+            raise RuntimeError(
+                "AUTH LOGIN konnte nicht gestartet werden: "
+                f"{code} {response}"
+            )
+
+        username_encoded = base64.b64encode(
+            sender.encode("utf-8")
+        ).decode("ascii")
+
+        password_encoded = base64.b64encode(
+            password.encode("utf-8")
+        ).decode("ascii")
+
+        print("Benutzername senden...")
+
+        code, response = server.docmd(
+            "",
+            username_encoded
+        )
+
+        print(code, response)
+
+        if code != 334:
+
+            raise RuntimeError(
+                "Benutzername wurde abgelehnt: "
+                f"{code} {response}"
+            )
+
+        print("Passwort senden...")
+
+        code, response = server.docmd(
+            "",
+            password_encoded
+        )
+
+        print(code, response)
+
+        if code != 235:
+
+            raise RuntimeError(
+                "Authentifizierung fehlgeschlagen: "
+                f"{code} {response}"
+            )
+
+        print("Login erfolgreich.")
+
+        # ----------------------------------------------------
+        # MAIL FROM
+        # ----------------------------------------------------
+
+        code, response = server.mail(sender)
+
+        print(
+            "MAIL FROM:",
+            code,
+            response
+        )
+
+        if code != 250:
+
+            raise RuntimeError(
+                f"MAIL FROM abgelehnt: {code} {response}"
+            )
+
+        # ----------------------------------------------------
+        # RCPT TO
+        # ----------------------------------------------------
+
+        code, response = server.rcpt(recipient)
+
+        print(
+            "RCPT TO:",
+            code,
+            response
+        )
+
+        if code != 250:
+
+            raise RuntimeError(
+                f"RCPT TO abgelehnt: {code} {response}"
+            )
+
+        # ----------------------------------------------------
+        # DATA
+        # ----------------------------------------------------
+
+        code, response = server.data(
+            msg.as_bytes()
+        )
+
+        print(
+            "DATA:",
+            code,
+            response
+        )
+
+        if code != 250:
+
+            raise RuntimeError(
+                f"DATA abgelehnt: {code} {response}"
+            )
+
+        print()
+        print("E-MAIL ERFOLGREICH VERSENDET.")
+
+        return True
+
+    finally:
+
+        print("Schließe SMTP-Verbindung...")
+
+        try:
+            server.quit()
+
+        except Exception:
+            pass
+
+
+# ============================================================
 # HAUPTPROGRAMM
 # ============================================================
 
@@ -428,11 +622,16 @@ with sync_playwright() as p:
 
         print()
         print("========================================")
-        print("BEREITS BEKANNTE STELLEN")
+        print("STELLA MONITOR")
         print("========================================")
 
         print(
-            "Anzahl:",
+            "Ort:",
+            ORT_NAME
+        )
+
+        print(
+            "Bereits bekannte Stellen:",
             len(seen)
         )
 
@@ -460,29 +659,19 @@ with sync_playwright() as p:
             page.url
         )
 
-        # ----------------------------------------------------
-        # Ausschreibungen auslesen
-        # ----------------------------------------------------
-
         results = get_result_rows(page)
 
         print()
         print(
-            "Gefundene Ausschreibungen:",
+            "Gefundene Fachleiter-Ausschreibungen:",
             len(results)
         )
 
         # ----------------------------------------------------
-        # Ergebnisse prüfen
+        # Neue Stellen
         # ----------------------------------------------------
 
         new_jobs = []
-
-        # Kopie der Merkliste.
-        # Änderungen werden erst nach erfolgreicher
-        # Verarbeitung dauerhaft gespeichert.
-
-        updated_seen = dict(seen)
 
         for index, result in enumerate(
             results,
@@ -492,14 +681,15 @@ with sync_playwright() as p:
             print()
             print("----------------------------------------")
             print(
-                f"Prüfe Ausschreibung {index}/{len(results)}"
+                f"Prüfe Ausschreibung "
+                f"{index}/{len(results)}"
             )
             print("----------------------------------------")
 
             result_text = result["text"]
 
             # ------------------------------------------------
-            # Sonderpädagogik prüfen
+            # Sonderpädagogik
             # ------------------------------------------------
 
             if not is_sonderpaedagogik(
@@ -536,7 +726,8 @@ with sync_playwright() as p:
             if job_id in seen:
 
                 print(
-                    "→ Bereits bekannt – keine erneute Meldung"
+                    "→ Bereits bekannt – "
+                    "keine E-Mail"
                 )
 
                 continue
@@ -555,7 +746,10 @@ with sync_playwright() as p:
 
                 try:
 
-                    row_text = row.inner_text().strip()
+                    row_text = (
+                        row.inner_text()
+                        .strip()
+                    )
 
                 except Exception:
 
@@ -604,7 +798,7 @@ with sync_playwright() as p:
                     break
 
             # ------------------------------------------------
-            # Detailtext laden
+            # Detailseite laden
             # ------------------------------------------------
 
             detail_text = result_text
@@ -628,10 +822,6 @@ with sync_playwright() as p:
             # Neue Stelle
             # ------------------------------------------------
 
-            print(
-                "→ NEUE STELLE!"
-            )
-
             timestamp = datetime.now().isoformat(
                 timespec="seconds"
             )
@@ -647,98 +837,94 @@ with sync_playwright() as p:
                 "text": detail_text
             }
 
-            new_jobs.append(
-                job_data
+            print()
+            print(
+                "→ NEUE STELLE GEFUNDEN!"
             )
 
-            # Noch nicht in die echte Merkliste schreiben.
-            updated_seen[job_id] = {
+            # ------------------------------------------------
+            # E-MAIL SENDEN
+            # ------------------------------------------------
 
-                "url": detail_page_url,
+            try:
 
-                "erstmals_gefunden": timestamp
-            }
+                mail_success = send_email(
+                    job_data
+                )
 
-        # ----------------------------------------------------
-        # MERKLISTE SPEICHERN
-        # ----------------------------------------------------
-
-        if new_jobs:
-
-            if save_seen(updated_seen):
+            except Exception as e:
 
                 print()
                 print(
-                    "Merkliste erfolgreich aktualisiert."
+                    "FEHLER BEIM E-MAIL-VERSAND:"
                 )
 
-            else:
-
-                print()
                 print(
-                    "WARNUNG: Merkliste konnte nicht gespeichert werden."
+                    type(e).__name__ + ":",
+                    e
+                )
+
+                # WICHTIG:
+                # Nicht als bekannt speichern!
+                # Beim nächsten Lauf wird erneut versucht,
+                # die Mail zu senden.
+
+                raise
+
+            # ------------------------------------------------
+            # Erst NACH erfolgreicher Mail speichern
+            # ------------------------------------------------
+
+            if mail_success:
+
+                seen[job_id] = {
+
+                    "url": detail_page_url,
+
+                    "erstmals_gefunden": timestamp
+                }
+
+                if save_seen(seen):
+
+                    print(
+                        "→ Stelle erfolgreich "
+                        "als gemeldet gespeichert."
+                    )
+
+                else:
+
+                    raise RuntimeError(
+                        "E-Mail wurde gesendet, "
+                        "aber die Merkliste konnte "
+                        "nicht gespeichert werden."
+                    )
+
+                new_jobs.append(
+                    job_data
                 )
 
         # ----------------------------------------------------
-        # AUSGABE
+        # ABSCHLUSS
         # ----------------------------------------------------
 
         print()
         print()
         print("========================================")
-        print("NEUE SONDERPÄDAGOGIK-STELLEN")
+        print("CHECK BEENDET")
         print("========================================")
 
         if not new_jobs:
 
-            print()
             print(
-                "Keine neuen passenden Stellen gefunden."
+                "Keine neuen passenden Stellen."
             )
 
         else:
 
-            print()
             print(
-                f"{len(new_jobs)} neue Stelle(n) gefunden!"
+                f"{len(new_jobs)} neue Stelle(n) "
+                "gemeldet."
             )
-
-            for i, job in enumerate(
-                new_jobs,
-                start=1
-            ):
-
-                print()
-                print("########################################")
-                print(
-                    f"NEUE STELLE {i}"
-                )
-                print("########################################")
-
-                print()
-                print(
-                    "ID:",
-                    job["id"]
-                )
-
-                print()
-                print(
-                    "URL:",
-                    job["url"]
-                )
-
-                print()
-                print(
-                    "KOMPLETTER AUSSCHREIBUNGSTEXT:"
-                )
-
-                print("----------------------------------------")
-
-                print(
-                    job["text"]
-                )
-
-                print("----------------------------------------")
 
     except Exception as e:
 
@@ -759,6 +945,4 @@ with sync_playwright() as p:
         browser.close()
 
         print()
-        print("========================================")
-        print("CHECK BEENDET")
-        print("========================================")
+        print("Browser geschlossen.")
