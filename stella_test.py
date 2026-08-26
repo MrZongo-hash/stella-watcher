@@ -2,8 +2,8 @@ from playwright.sync_api import sync_playwright
 import json
 import os
 import re
-import base64
 import smtplib
+import base64
 from email.message import EmailMessage
 from datetime import datetime
 
@@ -19,7 +19,7 @@ BASE = "https://www.schulministerium.nrw.de"
 # ------------------------------------------------------------
 # Zunächst Kleve zum Testen.
 #
-# Später für Köln:
+# Für den späteren Betrieb:
 #
 # ORT_NAME = "Köln"
 # ORT_VALUE = "315000"
@@ -28,11 +28,16 @@ BASE = "https://www.schulministerium.nrw.de"
 ORT_NAME = "Kleve"
 ORT_VALUE = "154036"
 
-# Datei mit bereits gemeldeten Stellen
-SEEN_FILE = "stella_bereits_gemeldet.json"
 
 # ============================================================
-# START-URL
+# DATEIEN
+# ============================================================
+
+SEEN_FILE = "stella_bereits_gemeldet.json"
+
+
+# ============================================================
+# STELLA START-URL
 # ============================================================
 
 START_URL = (
@@ -44,8 +49,27 @@ START_URL = (
     + "&stellenart=4_0"
 )
 
+
 # ============================================================
-# SCHLÜSSELWÖRTER
+# SMTP
+# ============================================================
+
+SMTP_SERVER = "mx.freenet.de"
+SMTP_PORT = 587
+
+
+# ============================================================
+# SONDERPÄDAGOGIK
+# ============================================================
+#
+# WICHTIG:
+# Die Prüfung erfolgt ausschließlich im Feld
+#
+# "Fachleiter/-in an einem Zentrum für schulpraktische
+# Lehrerausbildung (w/m/d)"
+#
+# Wir suchen NICHT mehr im kompletten Datensatz nach
+# "Sonderpädagogik".
 # ============================================================
 
 SONDERPAEDAGOGIK_KEYWORDS = [
@@ -55,8 +79,6 @@ SONDERPAEDAGOGIK_KEYWORDS = [
     "sonderpädagogischen",
     "lehramt für sonderpädagogische förderung",
     "lehramt für sonderpädagogik",
-    "seminar für das lehramt für sonderpädagogische förderung",
-    "seminar für das lehramt für sonderpädagogik",
 ]
 
 
@@ -67,7 +89,9 @@ SONDERPAEDAGOGIK_KEYWORDS = [
 def load_seen():
 
     if not os.path.exists(SEEN_FILE):
+
         print("Merkliste ist leer – starte mit 0 bekannten Stellen.")
+
         return {}
 
     try:
@@ -81,18 +105,30 @@ def load_seen():
             content = f.read().strip()
 
             if not content:
-                print("Merkliste ist leer – starte mit 0 bekannten Stellen.")
+
+                print(
+                    "Merkliste ist leer – starte mit 0 bekannten Stellen."
+                )
+
                 return {}
 
             data = json.loads(content)
 
             if isinstance(data, dict):
 
-                print(
-                    f"Merkliste geladen – {len(data)} bekannte Stellen."
-                )
+                # ------------------------------------------------
+                # Vorhandene IDs normalisieren
+                # ------------------------------------------------
 
-                return data
+                normalized = {}
+
+                for key, value in data.items():
+
+                    normalized_key = normalize_id(key)
+
+                    normalized[normalized_key] = value
+
+                return normalized
 
             return {}
 
@@ -140,19 +176,25 @@ def save_seen(seen):
 
 
 # ============================================================
-# SONDERPÄDAGOGIK ERKENNEN
+# ID NORMALISIEREN
 # ============================================================
 
-def is_sonderpaedagogik(text):
+def normalize_id(value):
 
-    text_lower = text.lower()
+    if value is None:
+        return ""
 
-    for keyword in SONDERPAEDAGOGIK_KEYWORDS:
+    value = str(value)
 
-        if keyword in text_lower:
-            return True
+    value = value.strip()
 
-    return False
+    value = re.sub(
+        r"\s+",
+        "",
+        value
+    )
+
+    return value.upper()
 
 
 # ============================================================
@@ -163,9 +205,9 @@ def extract_aktenzeichen(text):
 
     patterns = [
 
-        r"\b\d+\.[A-Z]-FL\d+[A-Z]?\b",
-
         r"\b\d+\.[A-Z]+-FL\d+[A-Z]?\b",
+
+        r"\b\d+\.[A-Z]-FL\d+[A-Z]?\b",
 
     ]
 
@@ -178,30 +220,32 @@ def extract_aktenzeichen(text):
         )
 
         if match:
-            return match.group(0).upper()
+
+            return normalize_id(
+                match.group(0)
+            )
 
     return None
 
 
 # ============================================================
-# STABILE ID
+# SONDERPÄDAGOGIK-FELD PRÜFEN
 # ============================================================
 
-def create_job_id(text):
+def is_sonderpaedagogik(fachleiter_feld):
 
-    aktenzeichen = extract_aktenzeichen(text)
+    if not fachleiter_feld:
+        return False
 
-    if aktenzeichen:
-        return aktenzeichen
+    text_lower = fachleiter_feld.lower()
 
-    normalized = " ".join(
-        text.split()
-    )
+    for keyword in SONDERPAEDAGOGIK_KEYWORDS:
 
-    return (
-        "NO_AKTENZEICHEN_"
-        + normalized[:300]
-    )
+        if keyword in text_lower:
+
+            return True
+
+    return False
 
 
 # ============================================================
@@ -258,31 +302,22 @@ def open_stella(page):
 
 
 # ============================================================
-# SUCHE DURCHFÜHREN
+# SUCHE
 # ============================================================
 
 def search_stella(page):
 
-    # --------------------------------------------------------
     # Fachleiter/-in
-    # --------------------------------------------------------
-
     page.locator(
         "#artStelle"
     ).select_option("404")
 
-    # --------------------------------------------------------
     # Studienseminar
-    # --------------------------------------------------------
-
     page.locator(
         "#institution"
     ).select_option("92")
 
-    # --------------------------------------------------------
     # Ort
-    # --------------------------------------------------------
-
     page.locator(
         "#ort"
     ).select_option(ORT_VALUE)
@@ -309,19 +344,6 @@ def search_stella(page):
 # ============================================================
 
 def get_result_rows(page):
-
-    """
-    Liest die Ausschreibungen aus der Ergebnisliste.
-
-    WICHTIG:
-    Die Sonderpädagogik-Prüfung erfolgt später ausschließlich
-    anhand des Feldes:
-
-    "Fachleiter/-in an einem Zentrum für schulpraktische
-    Lehrerausbildung (w/m/d)"
-
-    und NICHT anhand anderer Tabellenfelder.
-    """
 
     rows = page.locator("tr")
 
@@ -352,63 +374,149 @@ def get_result_rows(page):
 
         text_lower = text.lower()
 
+        # ----------------------------------------------------
+        # Nur Fachleiter-Zeilen
+        # ----------------------------------------------------
+
         if (
-            "fachleiter" not in text_lower
-            and "fachleiter/-in" not in text_lower
+            "fachleiter/-in an einem zentrum für schulpraktische"
+            not in text_lower
         ):
+
             continue
 
+        # Kopfzeile ignorieren
         if "stellenbezeichnung" in text_lower:
+
             continue
 
         # ----------------------------------------------------
-        # Zellen auslesen
+        # Fachleiter-Feld separat bestimmen
         # ----------------------------------------------------
 
-        cells = row.locator("td")
+        fachleiter_feld = ""
 
-        cell_texts = []
+        lines = [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip()
+        ]
 
-        for c in range(cells.count()):
+        for line in lines:
+
+            if (
+                line.lower()
+                == "fachleiter/-in an einem zentrum für schulpraktische lehrerausbildung (w/m/d)"
+            ):
+
+                fachleiter_feld = line
+
+                break
+
+        # ----------------------------------------------------
+        # In der Regel steht die Fachinformation direkt
+        # danach. Wir nehmen deshalb zusätzlich die folgende
+        # Zeile.
+        # ----------------------------------------------------
+
+        fachleiter_index = -1
+
+        for index, line in enumerate(lines):
+
+            if (
+                line.lower()
+                == "fachleiter/-in an einem zentrum für schulpraktische lehrerausbildung (w/m/d)"
+            ):
+
+                fachleiter_index = index
+
+                break
+
+        if fachleiter_index >= 0:
+
+            fachleiter_details = ""
+
+            if fachleiter_index + 1 < len(lines):
+
+                fachleiter_details = lines[
+                    fachleiter_index + 1
+                ]
+
+            if fachleiter_details:
+
+                fachleiter_feld = (
+                    fachleiter_feld
+                    + "\n"
+                    + fachleiter_details
+                )
+
+        # ----------------------------------------------------
+        # Aktenzeichen
+        # ----------------------------------------------------
+
+        aktenzeichen = extract_aktenzeichen(
+            text
+        )
+
+        if not aktenzeichen:
+
+            print(
+                "WARNUNG: Kein Aktenzeichen gefunden."
+            )
+
+            continue
+
+        # ----------------------------------------------------
+        # Detail-Link
+        # ----------------------------------------------------
+
+        detail_url = None
+
+        anchors = row.locator("a")
+
+        for a_index in range(
+            anchors.count()
+        ):
+
+            a = anchors.nth(
+                a_index
+            )
 
             try:
 
-                cell_text = cells.nth(c).inner_text().strip()
+                href = a.get_attribute(
+                    "href"
+                )
+
+                link_text = (
+                    a.inner_text()
+                    .strip()
+                )
+
+                if (
+                    "Weitere Hinweise"
+                    in link_text
+                    and href
+                ):
+
+                    detail_url = href
+
+                    break
 
             except Exception:
 
-                cell_text = ""
-
-            cell_texts.append(cell_text)
-
-        # ----------------------------------------------------
-        # Fachleiter-Feld ermitteln
-        # ----------------------------------------------------
-
-        fachleiter_field = ""
-
-        for cell_text in cell_texts:
-
-            if (
-                "fachleiter/-in an einem zentrum für schulpraktische"
-                in cell_text.lower()
-            ):
-
-                fachleiter_field = cell_text
-                break
-
-        # Falls das Feld nicht gefunden wurde,
-        # Ausschreibung ignorieren.
-
-        if not fachleiter_field:
-
-            continue
+                pass
 
         results.append({
+
             "text": text,
-            "cells": cell_texts,
-            "fachleiter_field": fachleiter_field,
-            "row_index": i
+
+            "fachleiter_feld": fachleiter_feld,
+
+            "aktenzeichen": aktenzeichen,
+
+            "detail_url": detail_url
+
         })
 
     return results
@@ -419,6 +527,10 @@ def get_result_rows(page):
 # ============================================================
 
 def read_detail_page(context, href):
+
+    if not href:
+
+        return None
 
     page = context.new_page()
 
@@ -447,8 +559,11 @@ def read_detail_page(context, href):
         ).inner_text()
 
         return {
+
             "url": page.url,
+
             "text": text
+
         }
 
     except Exception as e:
@@ -466,238 +581,141 @@ def read_detail_page(context, href):
 
 
 # ============================================================
-# DETAIL-LINK AUS ERGEBNISZEILE
+# INFORMATIONEN AUS ERGEBNISZEILE EXTRAHIEREN
 # ============================================================
 
-def find_detail_url(page, job_id):
-
-    rows = page.locator("tr")
-
-    for r in range(rows.count()):
-
-        row = rows.nth(r)
-
-        try:
-
-            row_text = row.inner_text().strip()
-
-        except Exception:
-
-            continue
-
-        if job_id.lower() not in row_text.lower():
-            continue
-
-        anchors = row.locator("a")
-
-        for a_index in range(
-            anchors.count()
-        ):
-
-            a = anchors.nth(
-                a_index
-            )
-
-            try:
-
-                link_text = (
-                    a.inner_text()
-                    .strip()
-                )
-
-                href = (
-                    a.get_attribute(
-                        "href"
-                    )
-                )
-
-                if (
-                    "Weitere Hinweise"
-                    in link_text
-                    and href
-                ):
-
-                    return href
-
-            except Exception:
-
-                pass
-
-    return None
-
-
-# ============================================================
-# FACH AUS DEM FACHLEITER-FELD ERMITTELN
-# ============================================================
-
-def extract_subject(fachleiter_field):
-
-    text = " ".join(
-        fachleiter_field.split()
-    )
-
-    patterns = [
-
-        r"Eine Fachleitung im Fach (.+?) am Seminar",
-
-        r"Fachleiter/innen im Fach (.+?) am Seminar",
-
-        r"Fachleiter/in(?:nen)? im Fach (.+?) am Seminar",
-
-    ]
-
-    for pattern in patterns:
-
-        match = re.search(
-            pattern,
-            text,
-            re.IGNORECASE
-        )
-
-        if match:
-
-            subject = match.group(1).strip()
-
-            subject = re.sub(
-                r"\s*-\s*Aktenzeichen:.*$",
-                "",
-                subject,
-                flags=re.IGNORECASE
-            )
-
-            return subject
-
-    return "Nicht angegeben"
-
-
-# ============================================================
-# LEHRAMT / SEMINAR ERMITTELN
-# ============================================================
-
-def extract_seminar_info(fachleiter_field):
-
-    text = " ".join(
-        fachleiter_field.split()
-    )
-
-    match = re.search(
-        r"am Seminar für das (Lehramt.+?)(?:\s*-\s*Aktenzeichen:|$)",
-        text,
-        re.IGNORECASE
-    )
-
-    if match:
-
-        return match.group(1).strip()
-
-    return "Nicht angegeben"
-
-
-# ============================================================
-# AKTENZEICHEN AUS FACHLEITER-FELD
-# ============================================================
-
-def extract_job_title(fachleiter_field):
+def extract_information(result_text):
 
     lines = [
         line.strip()
-        for line in fachleiter_field.splitlines()
+        for line in result_text.splitlines()
         if line.strip()
     ]
-
-    if not lines:
-        return "Fachleiter/-in an einem Zentrum für schulpraktische Lehrerausbildung (w/m/d)"
-
-    return lines[0]
-
-
-# ============================================================
-# ZELLE NACH POSITION SUCHEN
-# ============================================================
-
-def find_cell_containing(cells, keywords):
-
-    for cell in cells:
-
-        cell_lower = cell.lower()
-
-        if all(
-            keyword.lower() in cell_lower
-            for keyword in keywords
-        ):
-
-            return cell.strip()
-
-    return ""
-
-
-# ============================================================
-# STELLENINFORMATIONEN AUS TABELLE EXTRAHIEREN
-# ============================================================
-
-def extract_job_information(result):
-
-    cells = result["cells"]
-
-    fachleiter_field = result["fachleiter_field"]
-
-    # --------------------------------------------------------
-    # Fach
-    # --------------------------------------------------------
-
-    fach = extract_subject(
-        fachleiter_field
-    )
-
-    # --------------------------------------------------------
-    # Seminar / Lehramt
-    # --------------------------------------------------------
-
-    seminar = extract_seminar_info(
-        fachleiter_field
-    )
 
     # --------------------------------------------------------
     # Stellenbezeichnung
     # --------------------------------------------------------
 
-    stellenbezeichnung = extract_job_title(
-        fachleiter_field
+    stellenbezeichnung = (
+        "Fachleiter/-in an einem Zentrum für schulpraktische "
+        "Lehrerausbildung (w/m/d)"
     )
+
+    # --------------------------------------------------------
+    # Ausschreibung
+    # --------------------------------------------------------
+
+    ausschreibung = ""
+
+    for i, line in enumerate(lines):
+
+        if (
+            line.lower()
+            == stellenbezeichnung.lower()
+        ):
+
+            if i + 1 < len(lines):
+
+                ausschreibung = lines[i + 1]
+
+            break
+
+    # --------------------------------------------------------
+    # Fach
+    # --------------------------------------------------------
+
+    fach = ""
+
+    fach_match = re.search(
+        r"(?:im Fach|im Fachbereich)\s+([^,]+?)(?:\s+am Seminar|\s+-\s+Aktenzeichen)",
+        result_text,
+        re.IGNORECASE
+    )
+
+    if fach_match:
+
+        fach = fach_match.group(1).strip()
+
+    else:
+
+        # Zweiter Versuch
+        fach_match = re.search(
+            r"Fachleiter/innen?\s+im Fach\s+(.+?)\s+am Seminar",
+            result_text,
+            re.IGNORECASE
+        )
+
+        if fach_match:
+
+            fach = fach_match.group(1).strip()
+
+    # --------------------------------------------------------
+    # Lehramt / Seminar
+    # --------------------------------------------------------
+
+    lehramt = ""
+
+    seminar_match = re.search(
+        r"am Seminar für das (Lehramt[^,\-]+)",
+        result_text,
+        re.IGNORECASE
+    )
+
+    if seminar_match:
+
+        lehramt = seminar_match.group(1).strip()
 
     # --------------------------------------------------------
     # Ort
     # --------------------------------------------------------
 
-    ort = find_cell_containing(
-        cells,
-        [ORT_NAME]
+    ort = ORT_NAME
+
+    # --------------------------------------------------------
+    # ZfsL
+    # --------------------------------------------------------
+
+    zfs_l = ""
+
+    zfs_match = re.search(
+        r"(Zentrum für schulpraktische Lehrerausbildung[^\t\n]*)",
+        result_text,
+        re.IGNORECASE
     )
 
-    if not ort:
-        ort = ORT_NAME
+    if zfs_match:
+
+        zfs_l = zfs_match.group(1).strip()
 
     # --------------------------------------------------------
-    # Besoldung / Zulage
+    # Vergütung
     # --------------------------------------------------------
 
-    besoldung = ""
+    verguetung = ""
 
-    for cell in cells:
+    verguetung_patterns = [
 
-        lower = cell.lower()
+        r"(Zulage gemäß § 55.*?BesG NRW)",
 
-        if (
-            "zulage" in lower
-            or "besoldung" in lower
-            or "lbeso" in lower
-        ):
+        r"(A\s*14\s*-\s*A\s*15\s*LBesO)",
 
-            besoldung = cell.strip()
+        r"(A\s*\d+\s*-\s*A\s*\d+\s*LBesO)",
+
+    ]
+
+    for pattern in verguetung_patterns:
+
+        match = re.search(
+            pattern,
+            result_text,
+            re.IGNORECASE
+        )
+
+        if match:
+
+            verguetung = match.group(1).strip()
+
             break
-
-    if not besoldung:
-        besoldung = "Nicht angegeben"
 
     # --------------------------------------------------------
     # Voraussetzungen
@@ -705,187 +723,194 @@ def extract_job_information(result):
 
     voraussetzungen = ""
 
-    for cell in cells:
+    marker = (
+        "Befähigung für das Lehramt"
+    )
 
-        lower = cell.lower()
+    start = result_text.find(
+        marker
+    )
 
-        if (
-            "befähigung für das lehramt" in lower
-            or "beendigung der beamtenrechtlichen probezeit" in lower
-        ):
+    if start >= 0:
 
-            voraussetzungen = cell.strip()
-            break
+        remaining = result_text[
+            start:
+        ]
 
-    if not voraussetzungen:
-        voraussetzungen = "Nicht angegeben"
+        # Tätigkeit beginnt meistens danach
+        end_markers = [
+            "Teilzeitbeschäftigung",
+            "Weitere Hinweise"
+        ]
+
+        end_positions = []
+
+        for end_marker in end_markers:
+
+            position = remaining.find(
+                end_marker
+            )
+
+            if position > 0:
+
+                end_positions.append(
+                    position
+                )
+
+        if end_positions:
+
+            voraussetzungen = remaining[
+                :min(end_positions)
+            ].strip()
 
     # --------------------------------------------------------
-    # Tätigkeit / gewünschte Erfahrungen
+    # Tätigkeit
     # --------------------------------------------------------
 
     taetigkeit = ""
 
-    for cell in cells:
+    start = result_text.find(
+        "Teilzeitbeschäftigung"
+    )
 
-        lower = cell.lower()
+    if start >= 0:
 
-        if (
-            "teilzeitbeschäftigung" in lower
-            or "die tätigkeit umfasst" in lower
-            or "gewünscht sind" in lower
-        ):
+        remaining = result_text[
+            start:
+        ]
 
-            taetigkeit = cell.strip()
-            break
+        end = remaining.find(
+            "Weitere Hinweise"
+        )
 
-    if not taetigkeit:
-        taetigkeit = "Nicht angegeben"
+        if end > 0:
+
+            taetigkeit = remaining[
+                :end
+            ].strip()
+
+        else:
+
+            taetigkeit = remaining.strip()
 
     # --------------------------------------------------------
     # Bewerbungsfrist
     # --------------------------------------------------------
+    #
+    # WICHTIG:
+    # Wir suchen hier bewusst nach einem Datum am Ende
+    # der Ergebniszeile.
+    #
+    # Das verhindert, dass z.B. "ab 01.10.2011" aus den
+    # Lehramtsvoraussetzungen als Bewerbungsfrist
+    # übernommen wird.
+    # --------------------------------------------------------
 
-    frist = ""
+    dates = re.findall(
+        r"\b\d{2}\.\d{2}\.\d{4}\b",
+        result_text
+    )
 
-    date_pattern = r"\b\d{2}\.\d{2}\.\d{4}\b"
+    bewerbungsfrist = ""
 
-    for cell in cells:
+    if dates:
 
-        dates = re.findall(
-            date_pattern,
-            cell
-        )
-
-        if dates:
-
-            # Die letzte Datumsangabe der betreffenden
-            # Zelle ist normalerweise die Bewerbungsfrist.
-            frist = dates[-1]
-            break
-
-    if not frist:
-        frist = "Nicht angegeben"
+        # Normalerweise ist das letzte Datum die Frist.
+        bewerbungsfrist = dates[-1]
 
     # --------------------------------------------------------
-    # Bewerbung / Kontakt
+    # Kontakt
     # --------------------------------------------------------
 
     kontakt = ""
 
-    for cell in cells:
+    kontakt_match = re.search(
+        r"(Bezirksregierung.*?)(?:\n|$)",
+        result_text,
+        re.IGNORECASE
+    )
 
-        lower = cell.lower()
+    if kontakt_match:
 
-        if (
-            "dez47.fachleitung" in lower
-            or "bezirksregierung düsseldorf" in lower
-        ):
+        kontakt = kontakt_match.group(1).strip()
 
-            kontakt = cell.strip()
-            break
+    email = ""
 
-    if not kontakt:
-        kontakt = "Nicht angegeben"
+    email_match = re.search(
+        r"[\w\.-]+@[\w\.-]+\.\w+",
+        result_text
+    )
+
+    if email_match:
+
+        email = email_match.group(0)
+
+    # --------------------------------------------------------
+    # Telefonnummer
+    # --------------------------------------------------------
+
+    telefon = ""
+
+    telefon_match = re.search(
+        r"\b0\d{2,5}[-\s]\d{3,8}\b",
+        result_text
+    )
+
+    if telefon_match:
+
+        telefon = telefon_match.group(0)
 
     return {
-        "fach": fach,
-        "seminar": seminar,
-        "stellenbezeichnung": stellenbezeichnung,
-        "ort": ort,
-        "besoldung": besoldung,
-        "voraussetzungen": voraussetzungen,
-        "taetigkeit": taetigkeit,
-        "frist": frist,
-        "kontakt": kontakt
+
+        "stellenbezeichnung":
+            stellenbezeichnung,
+
+        "ausschreibung":
+            ausschreibung,
+
+        "fach":
+            fach,
+
+        "lehramt":
+            lehramt,
+
+        "ort":
+            ort,
+
+        "zfs_l":
+            zfs_l,
+
+        "verguetung":
+            verguetung,
+
+        "voraussetzungen":
+            voraussetzungen,
+
+        "taetigkeit":
+            taetigkeit,
+
+        "bewerbungsfrist":
+            bewerbungsfrist,
+
+        "kontakt":
+            kontakt,
+
+        "email":
+            email,
+
+        "telefon":
+            telefon
+
     }
 
 
 # ============================================================
-# TEXT AUFBEREITEN
-# ============================================================
-
-def clean_text(text):
-
-    if not text:
-        return ""
-
-    # Mehrfache Leerzeichen reduzieren
-    text = re.sub(
-        r"[ \t]+",
-        " ",
-        text
-    )
-
-    # Mehrfache Leerzeilen reduzieren
-    text = re.sub(
-        r"\n\s*\n+",
-        "\n",
-        text
-    )
-
-    return text.strip()
-
-
-# ============================================================
-# KONTAKT AUFBEREITEN
-# ============================================================
-
-def format_contact(contact):
-
-    contact = clean_text(
-        contact
-    )
-
-    # E-Mail-Adresse separat erkennen
-    email_match = re.search(
-        r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}",
-        contact
-    )
-
-    email_address = (
-        email_match.group(0)
-        if email_match
-        else None
-    )
-
-    # Faxnummern entfernen
-    contact = re.sub(
-        r"Fax:\s*[0-9\-/ ]+",
-        "",
-        contact,
-        flags=re.IGNORECASE
-    )
-
-    contact = re.sub(
-        r"\s{2,}",
-        " ",
-        contact
-    )
-
-    contact = contact.strip(
-        " -\t"
-    )
-
-    if email_address:
-
-        return (
-            f"{contact}\n"
-            f"E-Mail: {email_address}"
-        )
-
-    return contact
-
-
-# ============================================================
-# E-MAIL TEXT ERSTELLEN
+# E-MAIL TEXT ERZEUGEN
 # ============================================================
 
 def build_email(new_jobs):
 
-    now = datetime.now()
-
-    timestamp = now.strftime(
+    now = datetime.now().strftime(
         "%d.%m.%Y %H:%M:%S"
     )
 
@@ -896,29 +921,33 @@ def build_email(new_jobs):
     )
 
     lines.append("")
+
     lines.append(
         f"Ort: {ORT_NAME}"
     )
+
     lines.append(
         f"Anzahl neue Stellen: {len(new_jobs)}"
     )
+
     lines.append(
-        f"Prüfzeitpunkt: {timestamp}"
+        f"Prüfzeitpunkt: {now}"
     )
 
     lines.append("")
+
     lines.append(
         "=" * 68
     )
+
+    lines.append("")
 
     for index, job in enumerate(
         new_jobs,
         start=1
     ):
 
-        info = job["information"]
-
-        lines.append("")
+        info = job["info"]
 
         lines.append(
             f"STELLE {index} VON {len(new_jobs)}"
@@ -929,7 +958,7 @@ def build_email(new_jobs):
         )
 
         # ----------------------------------------------------
-        # Basisdaten
+        # Kopf
         # ----------------------------------------------------
 
         lines.append(
@@ -937,7 +966,7 @@ def build_email(new_jobs):
         )
 
         lines.append(
-            f"Lehramt / Seminar: {info['seminar']}"
+            f"Lehramt / Seminar: {info['lehramt']}"
         )
 
         lines.append(
@@ -963,9 +992,7 @@ def build_email(new_jobs):
         )
 
         lines.append(
-            clean_text(
-                info["stellenbezeichnung"]
-            )
+            info["stellenbezeichnung"]
         )
 
         lines.append("")
@@ -986,32 +1013,9 @@ def build_email(new_jobs):
             "-" * 68
         )
 
-        fachleiter_field = clean_text(
-            job["fachleiter_field"]
+        lines.append(
+            info["ausschreibung"]
         )
-
-        # Die erste Zeile ist die allgemeine
-        # Stellenbezeichnung. Diese wurde bereits oben
-        # ausgegeben.
-        fachleiter_lines = [
-            line.strip()
-            for line in fachleiter_field.splitlines()
-            if line.strip()
-        ]
-
-        if len(fachleiter_lines) > 1:
-
-            lines.append(
-                " ".join(
-                    fachleiter_lines[1:]
-                )
-            )
-
-        else:
-
-            lines.append(
-                fachleiter_field
-            )
 
         lines.append("")
 
@@ -1036,7 +1040,11 @@ def build_email(new_jobs):
         )
 
         lines.append(
-            info["seminar"]
+            info["zfs_l"]
+        )
+
+        lines.append(
+            info["lehramt"]
         )
 
         lines.append("")
@@ -1058,9 +1066,7 @@ def build_email(new_jobs):
         )
 
         lines.append(
-            clean_text(
-                info["besoldung"]
-            )
+            info["verguetung"]
         )
 
         lines.append("")
@@ -1082,9 +1088,7 @@ def build_email(new_jobs):
         )
 
         lines.append(
-            clean_text(
-                info["voraussetzungen"]
-            )
+            info["voraussetzungen"]
         )
 
         lines.append("")
@@ -1106,9 +1110,7 @@ def build_email(new_jobs):
         )
 
         lines.append(
-            clean_text(
-                info["taetigkeit"]
-            )
+            info["taetigkeit"]
         )
 
         lines.append("")
@@ -1130,7 +1132,7 @@ def build_email(new_jobs):
         )
 
         lines.append(
-            info["frist"]
+            info["bewerbungsfrist"]
         )
 
         lines.append("")
@@ -1152,15 +1154,25 @@ def build_email(new_jobs):
         )
 
         lines.append(
-            format_contact(
-                info["kontakt"]
-            )
+            info["kontakt"]
         )
+
+        if info["telefon"]:
+
+            lines.append(
+                info["telefon"]
+            )
+
+        if info["email"]:
+
+            lines.append(
+                f"E-Mail: {info['email']}"
+            )
 
         lines.append("")
 
         # ----------------------------------------------------
-        # STELLA-LINK
+        # STELLA
         # ----------------------------------------------------
 
         lines.append(
@@ -1181,6 +1193,8 @@ def build_email(new_jobs):
 
         lines.append("")
 
+        lines.append("")
+
     lines.append(
         "=" * 68
     )
@@ -1189,9 +1203,7 @@ def build_email(new_jobs):
         "STELLA Monitor"
     )
 
-    return "\n".join(
-        lines
-    )
+    return "\n".join(lines)
 
 
 # ============================================================
@@ -1200,24 +1212,34 @@ def build_email(new_jobs):
 
 def send_email(new_jobs):
 
+    if not new_jobs:
+
+        print(
+            "Keine E-Mail notwendig."
+        )
+
+        return True
+
     sender = os.environ["FREENET_EMAIL"]
+
     password = os.environ["FREENET_PASSWORD"]
+
     recipient = os.environ["MAIL_TO"]
 
     email_body = build_email(
         new_jobs
     )
 
-    subject = (
-        f"STELLA: {len(new_jobs)} neue "
-        f"Fachleiter-Stelle(n) – {ORT_NAME}"
-    )
-
     msg = EmailMessage()
 
     msg["From"] = sender
+
     msg["To"] = recipient
-    msg["Subject"] = subject
+
+    msg["Subject"] = (
+        f"STELLA: {len(new_jobs)} neue "
+        f"Fachleiter-Stelle(n) – {ORT_NAME}"
+    )
 
     msg.set_content(
         email_body
@@ -1227,9 +1249,11 @@ def send_email(new_jobs):
     print(
         "========================================"
     )
+
     print(
         "VERSENDE GESAMMELTE E-MAIL"
     )
+
     print(
         "========================================"
     )
@@ -1239,16 +1263,12 @@ def send_email(new_jobs):
     )
 
     server = smtplib.SMTP(
-        "mx.freenet.de",
-        587,
+        SMTP_SERVER,
+        SMTP_PORT,
         timeout=30
     )
 
     try:
-
-        # ----------------------------------------------------
-        # EHLO
-        # ----------------------------------------------------
 
         print("EHLO...")
 
@@ -1259,10 +1279,6 @@ def send_email(new_jobs):
             response
         )
 
-        # ----------------------------------------------------
-        # STARTTLS
-        # ----------------------------------------------------
-
         print("STARTTLS...")
 
         code, response = server.starttls()
@@ -1272,13 +1288,7 @@ def send_email(new_jobs):
             response
         )
 
-        # ----------------------------------------------------
-        # EHLO nach TLS
-        # ----------------------------------------------------
-
-        print(
-            "EHLO nach TLS..."
-        )
+        print("EHLO nach TLS...")
 
         code, response = server.ehlo()
 
@@ -1310,17 +1320,19 @@ def send_email(new_jobs):
                 f"{code} {response}"
             )
 
-        # ----------------------------------------------------
-        # Benutzername
-        # ----------------------------------------------------
+        username_encoded = (
+            base64.b64encode(
+                sender.encode("utf-8")
+            )
+            .decode("ascii")
+        )
 
-        username_encoded = base64.b64encode(
-            sender.encode("utf-8")
-        ).decode("ascii")
-
-        password_encoded = base64.b64encode(
-            password.encode("utf-8")
-        ).decode("ascii")
+        password_encoded = (
+            base64.b64encode(
+                password.encode("utf-8")
+            )
+            .decode("ascii")
+        )
 
         print(
             "Benutzername senden..."
@@ -1342,10 +1354,6 @@ def send_email(new_jobs):
                 "Benutzername wurde abgelehnt: "
                 f"{code} {response}"
             )
-
-        # ----------------------------------------------------
-        # Passwort
-        # ----------------------------------------------------
 
         print(
             "Passwort senden..."
@@ -1436,12 +1444,15 @@ def send_email(new_jobs):
         print(
             "========================================"
         )
+
         print(
             "E-MAIL ERFOLGREICH VERSENDET."
         )
+
         print(
             f"{len(new_jobs)} Stelle(n) in einer einzigen E-Mail."
         )
+
         print(
             "========================================"
         )
@@ -1454,10 +1465,7 @@ def send_email(new_jobs):
             "Schließe SMTP-Verbindung..."
         )
 
-        try:
-            server.quit()
-        except Exception:
-            pass
+        server.quit()
 
 
 # ============================================================
@@ -1480,9 +1488,11 @@ with sync_playwright() as p:
         print(
             "========================================"
         )
+
         print(
             "STELLA MONITOR"
         )
+
         print(
             "========================================"
         )
@@ -1492,7 +1502,7 @@ with sync_playwright() as p:
         )
 
         # ----------------------------------------------------
-        # Merkliste laden
+        # MERKLISTE
         # ----------------------------------------------------
 
         seen = load_seen()
@@ -1501,8 +1511,21 @@ with sync_playwright() as p:
             f"Bereits bekannte Stellen: {len(seen)}"
         )
 
+        if seen:
+
+            print()
+            print(
+                "Bekannte Aktenzeichen:"
+            )
+
+            for known_id in seen:
+
+                print(
+                    f"  - {known_id}"
+                )
+
         # ----------------------------------------------------
-        # STELLA öffnen
+        # STELLA
         # ----------------------------------------------------
 
         open_stella(page)
@@ -1510,7 +1533,7 @@ with sync_playwright() as p:
         search_stella(page)
 
         # ----------------------------------------------------
-        # Ergebnisse
+        # ERGEBNIS
         # ----------------------------------------------------
 
         print()
@@ -1542,21 +1565,21 @@ with sync_playwright() as p:
         )
 
         # ----------------------------------------------------
-        # Neue Stellen sammeln
+        # NEUE STELLEN
         # ----------------------------------------------------
 
         new_jobs = []
 
-        # ----------------------------------------------------
-        # Merkliste zunächst NICHT verändern
-        # ----------------------------------------------------
+        # Wichtig:
+        # updated_seen wird erst nach erfolgreichem
+        # Mailversand wirklich gespeichert.
 
         updated_seen = dict(
             seen
         )
 
         # ----------------------------------------------------
-        # Ergebnisse prüfen
+        # ALLE ERGEBNISSE PRÜFEN
         # ----------------------------------------------------
 
         for index, result in enumerate(
@@ -1570,27 +1593,32 @@ with sync_playwright() as p:
             )
 
             print(
-                f"Prüfe Ausschreibung "
-                f"{index}/{len(results)}"
+                f"Prüfe Ausschreibung {index}/{len(results)}"
             )
 
             print(
                 "----------------------------------------"
             )
 
-            # ------------------------------------------------
-            # WICHTIG:
-            #
-            # Die Sonderpädagogik-Prüfung erfolgt ausschließlich
-            # im Fachleiter-Feld.
-            # ------------------------------------------------
-
-            fachleiter_field = result[
-                "fachleiter_field"
+            fachleiter_feld = result[
+                "fachleiter_feld"
             ]
 
+            job_id = normalize_id(
+                result["aktenzeichen"]
+            )
+
+            print(
+                "Aktenzeichen:",
+                job_id
+            )
+
+            # ------------------------------------------------
+            # SONDERPÄDAGOGIK
+            # ------------------------------------------------
+
             if not is_sonderpaedagogik(
-                fachleiter_field
+                fachleiter_feld
             ):
 
                 print(
@@ -1604,40 +1632,39 @@ with sync_playwright() as p:
             )
 
             # ------------------------------------------------
-            # ID
+            # GANZ WICHTIG:
+            # BEREITS BEKANNT?
             # ------------------------------------------------
-
-            job_id = create_job_id(
-                fachleiter_field
-            )
 
             print(
-                "ID:",
-                job_id
+                "→ Prüfe gegen Merkliste..."
             )
-
-            # ------------------------------------------------
-            # Bereits bekannt?
-            # ------------------------------------------------
 
             if job_id in seen:
 
                 print(
-                    "→ Bereits bekannt – keine neue Meldung"
+                    f"→ BEREITS BEKANNT: {job_id}"
+                )
+
+                print(
+                    "→ Wird NICHT erneut gemeldet."
                 )
 
                 continue
 
-            # ------------------------------------------------
-            # Detailseite
-            # ------------------------------------------------
-
-            detail_url = find_detail_url(
-                page,
-                job_id
+            print(
+                f"→ NEUE STELLE: {job_id}"
             )
 
-            detail_page_url = page.url
+            # ------------------------------------------------
+            # DETAILSEITE
+            # ------------------------------------------------
+
+            detail = None
+
+            detail_url = result[
+                "detail_url"
+            ]
 
             if detail_url:
 
@@ -1646,63 +1673,70 @@ with sync_playwright() as p:
                     detail_url
                 )
 
-                if detail:
-
-                    detail_page_url = detail[
-                        "url"
-                    ]
-
             # ------------------------------------------------
-            # Stelleninformationen extrahieren
+            # STELLA-LINK
             # ------------------------------------------------
 
-            information = extract_job_information(
-                result
+            if detail:
+
+                stella_url = detail[
+                    "url"
+                ]
+
+            else:
+
+                stella_url = page.url
+
+            # ------------------------------------------------
+            # INFORMATIONEN
+            # ------------------------------------------------
+
+            info = extract_information(
+                result["text"]
             )
 
             # ------------------------------------------------
-            # Neue Stelle
+            # NEUE STELLE SAMMELN
             # ------------------------------------------------
-
-            print(
-                "→ NEUE STELLE ZUR SAMMLUNG HINZUGEFÜGT"
-            )
 
             timestamp = datetime.now().isoformat(
                 timespec="seconds"
             )
 
-            job_data = {
+            new_job = {
 
-                "id": job_id,
+                "id":
+                    job_id,
 
-                "url": detail_page_url,
+                "url":
+                    stella_url,
 
-                "gefunden_am": timestamp,
+                "gefunden_am":
+                    timestamp,
 
-                "fachleiter_field":
-                    fachleiter_field,
+                "info":
+                    info
 
-                "information":
-                    information
             }
 
             new_jobs.append(
-                job_data
+                new_job
             )
 
-            # Noch NICHT dauerhaft speichern.
-            #
-            # Das geschieht erst NACH erfolgreichem
-            # E-Mail-Versand.
-
+            # Noch NICHT endgültig speichern.
             updated_seen[job_id] = {
 
-                "url": detail_page_url,
+                "url":
+                    stella_url,
 
                 "erstmals_gefunden":
                     timestamp
+
             }
+
+            print(
+                "→ NEUE STELLE ZUR SAMMLUNG HINZUGEFÜGT"
+            )
 
         # ====================================================
         # AUSWERTUNG
@@ -1732,17 +1766,19 @@ with sync_playwright() as p:
         if not new_jobs:
 
             print()
+
             print(
                 "Keine neuen passenden Stellen gefunden."
             )
 
         # ====================================================
-        # NEUE STELLEN → EINE MAIL
+        # NEUE STELLEN
         # ====================================================
 
         else:
 
             print()
+
             print(
                 f"{len(new_jobs)} neue Stelle(n) gefunden."
             )
@@ -1752,15 +1788,40 @@ with sync_playwright() as p:
             )
 
             # ------------------------------------------------
-            # E-Mail senden
+            # MAIL VERSENDEN
             # ------------------------------------------------
 
-            mail_success = send_email(
-                new_jobs
-            )
+            mail_success = False
+
+            try:
+
+                mail_success = send_email(
+                    new_jobs
+                )
+
+            except Exception as e:
+
+                print()
+                print(
+                    "FEHLER BEIM E-MAIL-VERSAND:"
+                )
+
+                print(
+                    type(e).__name__ + ":",
+                    e
+                )
+
+                # Wichtig:
+                # Fehler weiterwerfen!
+                #
+                # Dadurch wird die Merkliste NICHT
+                # aktualisiert und die Stelle wird beim
+                # nächsten Lauf erneut gemeldet.
+
+                raise
 
             # ------------------------------------------------
-            # NUR BEI ERFOLGREICHEM VERSAND SPEICHERN
+            # NUR NACH ERFOLGREICHER MAIL SPEICHERN
             # ------------------------------------------------
 
             if mail_success:
@@ -1779,16 +1840,14 @@ with sync_playwright() as p:
                     )
 
                     print(
-                        f"{len(new_jobs)} Stelle(n) "
-                        "als gemeldet gespeichert."
+                        f"{len(new_jobs)} Stelle(n) als gemeldet gespeichert."
                     )
 
                 else:
 
                     raise RuntimeError(
-                        "E-Mail wurde versendet, "
-                        "aber die Merkliste konnte nicht "
-                        "gespeichert werden."
+                        "Merkliste konnte nach erfolgreichem "
+                        "Mailversand nicht gespeichert werden."
                     )
 
     except Exception as e:
