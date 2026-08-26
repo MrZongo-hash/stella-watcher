@@ -1,8 +1,11 @@
-name: STELLA prüfen
+name: STELLA täglich prüfen
 
 on:
   workflow_dispatch:
+
   schedule:
+    # Jeden Tag um 05:00 UTC
+    # = 07:00 Uhr deutscher Zeit im Sommer
     - cron: "0 5 * * *"
 
 permissions:
@@ -10,16 +13,34 @@ permissions:
 
 jobs:
   check-stella:
+
     runs-on: ubuntu-latest
 
     steps:
+
+      # ======================================================
+      # REPOSITORY
+      # ======================================================
+
       - name: Repository auschecken
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+
+      # ======================================================
+      # PYTHON
+      # ======================================================
 
       - name: Python einrichten
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+
+      # ======================================================
+      # PLAYWRIGHT
+      # ======================================================
 
       - name: Playwright installieren
         run: |
@@ -27,23 +48,43 @@ jobs:
           playwright install chromium
           playwright install-deps chromium
 
-      - name: STELLA testen
+
+      # ======================================================
+      # STELLA MONITOR
+      # ======================================================
+
+      - name: STELLA prüfen
         env:
           FREENET_EMAIL: ${{ secrets.FREENET_EMAIL }}
           FREENET_PASSWORD: ${{ secrets.FREENET_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
-        run: python stella_test.py
+        run: |
+          python stella_test.py
+
+
+      # ======================================================
+      # MERKLISTE SPEICHERN
+      # ======================================================
 
       - name: Merkliste speichern
         run: |
+
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add stella_bereits_gemeldet.json
 
           if git diff --cached --quiet; then
+
             echo "Keine Änderung an der Merkliste."
+
           else
-            git commit -m "STELLA: Merkliste aktualisieren"
+
+            git commit \
+              -m "STELLA: Merkliste aktualisieren"
+
             git push
+
           fi
