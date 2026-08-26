@@ -28,6 +28,10 @@ jobs:
           playwright install-deps chromium
 
       - name: STELLA testen
+        env:
+          FREENET_EMAIL: ${{ secrets.FREENET_EMAIL }}
+          FREENET_PASSWORD: ${{ secrets.FREENET_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
         run: python stella_test.py
 
       - name: Merkliste speichern
