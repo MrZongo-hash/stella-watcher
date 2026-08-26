@@ -14,26 +14,25 @@ from datetime import datetime
 
 BASE = "https://www.schulministerium.nrw.de"
 
-# ------------------------------------------------------------
+# ============================================================
 # TESTORT
-# ------------------------------------------------------------
+# ============================================================
 # Zunächst Kleve zum Testen.
 #
 # Später:
 # ORT_NAME = "Köln"
 # ORT_VALUE = "315000"
-# ------------------------------------------------------------
+# ============================================================
 
 ORT_NAME = "Kleve"
 ORT_VALUE = "154036"
-
 
 # Datei mit bereits gemeldeten Stellen
 SEEN_FILE = "stella_bereits_gemeldet.json"
 
 
 # ============================================================
-# E-MAIL / FREEnet
+# E-MAIL / FREENET
 # ============================================================
 
 SMTP_SERVER = "mx.freenet.de"
@@ -87,10 +86,25 @@ def load_seen():
             encoding="utf-8"
         ) as f:
 
-            data = json.load(f)
+            content = f.read().strip()
+
+            # Leere Datei = leere Merkliste
+            if not content:
+                print(
+                    "Merkliste ist leer – "
+                    "starte mit 0 bekannten Stellen."
+                )
+                return {}
+
+            data = json.loads(content)
 
             if isinstance(data, dict):
                 return data
+
+            print(
+                "WARNUNG: Merkliste enthält kein gültiges "
+                "JSON-Objekt. Starte mit leerer Merkliste."
+            )
 
             return {}
 
@@ -99,6 +113,10 @@ def load_seen():
         print(
             "Fehler beim Laden der Merkliste:",
             e
+        )
+
+        print(
+            "Starte vorsichtshalber mit leerer Merkliste."
         )
 
         return {}
@@ -398,51 +416,148 @@ def read_detail_page(context, href):
 
 
 # ============================================================
-# E-MAIL VERSENDEN
+# EINE E-MAIL MIT ALLEN NEUEN STELLEN
 # ============================================================
 
-def send_email(job):
+def send_email(jobs):
 
     sender = os.environ["FREENET_EMAIL"]
     password = os.environ["FREENET_PASSWORD"]
     recipient = os.environ["MAIL_TO"]
 
+    number_of_jobs = len(jobs)
+
     print()
     print("========================================")
-    print("VERSENDE E-MAIL")
+    print("VERSENDE GESAMMELTE E-MAIL")
     print("========================================")
+
+    print(
+        f"Neue Stellen in dieser Mail: {number_of_jobs}"
+    )
+
+    # --------------------------------------------------------
+    # Betreff
+    # --------------------------------------------------------
+
+    if number_of_jobs == 1:
+
+        subject = (
+            "1 neue STELLA-Stelle – "
+            f"Fachleitung Sonderpädagogik – {ORT_NAME}"
+        )
+
+    else:
+
+        subject = (
+            f"{number_of_jobs} neue STELLA-Stellen – "
+            f"Fachleitung Sonderpädagogik – {ORT_NAME}"
+        )
+
+    # --------------------------------------------------------
+    # E-Mail erstellen
+    # --------------------------------------------------------
 
     msg = EmailMessage()
 
     msg["From"] = sender
     msg["To"] = recipient
+    msg["Subject"] = subject
 
-    msg["Subject"] = (
-        "Neue STELLA-Stelle – "
-        f"Fachleitung Sonderpädagogik – {ORT_NAME}"
+    lines = []
+
+    lines.append(
+        "Neue passende STELLA-Ausschreibungen"
     )
 
-    email_text = (
-        "Eine neue passende Ausschreibung wurde gefunden.\n\n"
-        "========================================\n"
-        "STELLA MONITOR\n"
-        "========================================\n\n"
-
-        f"Ort: {ORT_NAME}\n"
-        f"Aktenzeichen: {job['id']}\n"
-        f"Gefunden am: {job['gefunden_am']}\n\n"
-
-        "DETAILSEITE:\n"
-        f"{job['url']}\n\n"
-
-        "========================================\n"
-        "AUSSCHREIBUNGSTEXT\n"
-        "========================================\n\n"
-
-        f"{job['text']}\n"
+    lines.append(
+        f"Ort: {ORT_NAME}"
     )
 
-    msg.set_content(email_text)
+    lines.append(
+        f"Anzahl neue Stellen: {number_of_jobs}"
+    )
+
+    lines.append("")
+
+    lines.append(
+        "=" * 60
+    )
+
+    # --------------------------------------------------------
+    # Alle neuen Stellen
+    # --------------------------------------------------------
+
+    for index, job in enumerate(
+        jobs,
+        start=1
+    ):
+
+        lines.append("")
+
+        lines.append(
+            f"STELLE {index} VON {number_of_jobs}"
+        )
+
+        lines.append(
+            "=" * 60
+        )
+
+        lines.append("")
+
+        lines.append(
+            f"Aktenzeichen: {job['id']}"
+        )
+
+        lines.append(
+            f"Gefunden am: {job['gefunden_am']}"
+        )
+
+        lines.append("")
+
+        lines.append(
+            "DETAILSEITE:"
+        )
+
+        lines.append(
+            job["url"]
+        )
+
+        lines.append("")
+
+        lines.append(
+            "AUSSCHREIBUNGSTEXT:"
+        )
+
+        lines.append(
+            "-" * 60
+        )
+
+        lines.append(
+            job["text"]
+        )
+
+        lines.append(
+            "-" * 60
+        )
+
+    lines.append("")
+
+    lines.append(
+        "Viele Grüße"
+    )
+
+    lines.append(
+        "STELLA Monitor"
+    )
+
+    msg.set_content(
+        "\n".join(lines)
+    )
+
+    # --------------------------------------------------------
+    # SMTP
+    # --------------------------------------------------------
 
     server = smtplib.SMTP(
         SMTP_SERVER,
@@ -453,16 +568,52 @@ def send_email(job):
     try:
 
         print("EHLO...")
+
         code, response = server.ehlo()
-        print(code, response)
+
+        print(
+            code,
+            response
+        )
+
+        if code != 250:
+
+            raise RuntimeError(
+                f"EHLO fehlgeschlagen: {code} {response}"
+            )
+
+        # ----------------------------------------------------
+        # STARTTLS
+        # ----------------------------------------------------
 
         print("STARTTLS...")
+
         code, response = server.starttls()
-        print(code, response)
+
+        print(
+            code,
+            response
+        )
+
+        if code != 220:
+
+            raise RuntimeError(
+                f"STARTTLS fehlgeschlagen: "
+                f"{code} {response}"
+            )
+
+        # ----------------------------------------------------
+        # EHLO nach TLS
+        # ----------------------------------------------------
 
         print("EHLO nach TLS...")
+
         code, response = server.ehlo()
-        print(code, response)
+
+        print(
+            code,
+            response
+        )
 
         # ----------------------------------------------------
         # AUTH LOGIN
@@ -475,7 +626,10 @@ def send_email(job):
             "LOGIN"
         )
 
-        print(code, response)
+        print(
+            code,
+            response
+        )
 
         if code != 334:
 
@@ -492,14 +646,19 @@ def send_email(job):
             password.encode("utf-8")
         ).decode("ascii")
 
-        print("Benutzername senden...")
+        print(
+            "Benutzername senden..."
+        )
 
         code, response = server.docmd(
             "",
             username_encoded
         )
 
-        print(code, response)
+        print(
+            code,
+            response
+        )
 
         if code != 334:
 
@@ -508,14 +667,19 @@ def send_email(job):
                 f"{code} {response}"
             )
 
-        print("Passwort senden...")
+        print(
+            "Passwort senden..."
+        )
 
         code, response = server.docmd(
             "",
             password_encoded
         )
 
-        print(code, response)
+        print(
+            code,
+            response
+        )
 
         if code != 235:
 
@@ -524,13 +688,17 @@ def send_email(job):
                 f"{code} {response}"
             )
 
-        print("Login erfolgreich.")
+        print(
+            "Login erfolgreich."
+        )
 
         # ----------------------------------------------------
         # MAIL FROM
         # ----------------------------------------------------
 
-        code, response = server.mail(sender)
+        code, response = server.mail(
+            sender
+        )
 
         print(
             "MAIL FROM:",
@@ -541,14 +709,17 @@ def send_email(job):
         if code != 250:
 
             raise RuntimeError(
-                f"MAIL FROM abgelehnt: {code} {response}"
+                f"MAIL FROM abgelehnt: "
+                f"{code} {response}"
             )
 
         # ----------------------------------------------------
         # RCPT TO
         # ----------------------------------------------------
 
-        code, response = server.rcpt(recipient)
+        code, response = server.rcpt(
+            recipient
+        )
 
         print(
             "RCPT TO:",
@@ -559,7 +730,8 @@ def send_email(job):
         if code != 250:
 
             raise RuntimeError(
-                f"RCPT TO abgelehnt: {code} {response}"
+                f"RCPT TO abgelehnt: "
+                f"{code} {response}"
             )
 
         # ----------------------------------------------------
@@ -579,22 +751,42 @@ def send_email(job):
         if code != 250:
 
             raise RuntimeError(
-                f"DATA abgelehnt: {code} {response}"
+                f"DATA abgelehnt: "
+                f"{code} {response}"
             )
 
         print()
-        print("E-MAIL ERFOLGREICH VERSENDET.")
+        print(
+            "========================================"
+        )
+
+        print(
+            "E-MAIL ERFOLGREICH VERSENDET."
+        )
+
+        print(
+            f"{number_of_jobs} Stelle(n) "
+            "in einer einzigen E-Mail."
+        )
+
+        print(
+            "========================================"
+        )
 
         return True
 
     finally:
 
-        print("Schließe SMTP-Verbindung...")
+        print(
+            "Schließe SMTP-Verbindung..."
+        )
 
         try:
+
             server.quit()
 
         except Exception:
+
             pass
 
 
@@ -615,7 +807,7 @@ with sync_playwright() as p:
     try:
 
         # ----------------------------------------------------
-        # Merkliste
+        # MERKLISTE
         # ----------------------------------------------------
 
         seen = load_seen()
@@ -644,14 +836,16 @@ with sync_playwright() as p:
         search_stella(page)
 
         # ----------------------------------------------------
-        # Ergebnis
+        # ERGEBNISSE
         # ----------------------------------------------------
 
         print()
         print("========================================")
+
         print(
             f"ERGEBNISSE FÜR {ORT_NAME.upper()}"
         )
+
         print("========================================")
 
         print(
@@ -668,7 +862,7 @@ with sync_playwright() as p:
         )
 
         # ----------------------------------------------------
-        # Neue Stellen
+        # HIER WERDEN ALLE NEUEN STELLEN GESAMMELT
         # ----------------------------------------------------
 
         new_jobs = []
@@ -680,10 +874,12 @@ with sync_playwright() as p:
 
             print()
             print("----------------------------------------")
+
             print(
                 f"Prüfe Ausschreibung "
                 f"{index}/{len(results)}"
             )
+
             print("----------------------------------------")
 
             result_text = result["text"]
@@ -727,7 +923,7 @@ with sync_playwright() as p:
 
                 print(
                     "→ Bereits bekannt – "
-                    "keine E-Mail"
+                    "keine Meldung"
                 )
 
                 continue
@@ -740,7 +936,9 @@ with sync_playwright() as p:
 
             rows = page.locator("tr")
 
-            for r in range(rows.count()):
+            for r in range(
+                rows.count()
+            ):
 
                 row = rows.nth(r)
 
@@ -798,7 +996,7 @@ with sync_playwright() as p:
                     break
 
             # ------------------------------------------------
-            # Detailseite laden
+            # DETAILSEITE LADEN
             # ------------------------------------------------
 
             detail_text = result_text
@@ -819,7 +1017,7 @@ with sync_playwright() as p:
                     detail_page_url = detail["url"]
 
             # ------------------------------------------------
-            # Neue Stelle
+            # NEUE STELLE SAMMELN
             # ------------------------------------------------
 
             timestamp = datetime.now().isoformat(
@@ -837,26 +1035,83 @@ with sync_playwright() as p:
                 "text": detail_text
             }
 
+            new_jobs.append(
+                job_data
+            )
+
+            print(
+                "→ NEUE STELLE ZUR SAMMLUNG HINZUGEFÜGT"
+            )
+
+        # ====================================================
+        # NACH DER GESAMTEN SUCHE
+        # ====================================================
+
+        print()
+        print("========================================")
+        print("AUSWERTUNG")
+        print("========================================")
+
+        print(
+            "Neue passende Stellen:",
+            len(new_jobs)
+        )
+
+        # ----------------------------------------------------
+        # KEINE NEUEN STELLEN
+        # ----------------------------------------------------
+
+        if not new_jobs:
+
             print()
             print(
-                "→ NEUE STELLE GEFUNDEN!"
+                "Keine neuen passenden Stellen."
+            )
+
+            print(
+                "Es wird keine E-Mail versendet."
+            )
+
+        # ----------------------------------------------------
+        # NEUE STELLEN → EINE GESAMMELTE E-MAIL
+        # ----------------------------------------------------
+
+        else:
+
+            print()
+            print(
+                f"{len(new_jobs)} neue Stelle(n) "
+                "gefunden."
+            )
+
+            print(
+                "Alle Stellen werden in EINER "
+                "E-Mail zusammengefasst."
             )
 
             # ------------------------------------------------
-            # E-MAIL SENDEN
+            # MAIL VERSENDEN
             # ------------------------------------------------
 
             try:
 
                 mail_success = send_email(
-                    job_data
+                    new_jobs
                 )
 
             except Exception as e:
 
                 print()
                 print(
-                    "FEHLER BEIM E-MAIL-VERSAND:"
+                    "========================================"
+                )
+
+                print(
+                    "FEHLER BEIM E-MAIL-VERSAND"
+                )
+
+                print(
+                    "========================================"
                 )
 
                 print(
@@ -864,67 +1119,66 @@ with sync_playwright() as p:
                     e
                 )
 
-                # WICHTIG:
-                # Nicht als bekannt speichern!
-                # Beim nächsten Lauf wird erneut versucht,
-                # die Mail zu senden.
+                # NICHT speichern!
+                #
+                # Dadurch werden die Stellen beim nächsten
+                # Lauf erneut als neu erkannt und die Mail
+                # erneut versucht.
 
                 raise
 
             # ------------------------------------------------
-            # Erst NACH erfolgreicher Mail speichern
+            # ERST NACH ERFOLGREICHER MAIL SPEICHERN
             # ------------------------------------------------
 
             if mail_success:
 
-                seen[job_id] = {
+                print()
+                print(
+                    "E-Mail erfolgreich versendet."
+                )
 
-                    "url": detail_page_url,
+                print(
+                    "Aktualisiere jetzt die Merkliste..."
+                )
 
-                    "erstmals_gefunden": timestamp
-                }
+                for job in new_jobs:
+
+                    seen[job["id"]] = {
+
+                        "url": job["url"],
+
+                        "erstmals_gefunden":
+                            job["gefunden_am"]
+                    }
 
                 if save_seen(seen):
 
                     print(
-                        "→ Stelle erfolgreich "
+                        "Merkliste erfolgreich aktualisiert."
+                    )
+
+                    print(
+                        f"{len(new_jobs)} Stelle(n) "
                         "als gemeldet gespeichert."
                     )
 
                 else:
 
                     raise RuntimeError(
-                        "E-Mail wurde gesendet, "
-                        "aber die Merkliste konnte "
-                        "nicht gespeichert werden."
+                        "E-Mail wurde erfolgreich "
+                        "versendet, aber die Merkliste "
+                        "konnte nicht gespeichert werden."
                     )
-
-                new_jobs.append(
-                    job_data
-                )
 
         # ----------------------------------------------------
         # ABSCHLUSS
         # ----------------------------------------------------
 
         print()
-        print()
         print("========================================")
         print("CHECK BEENDET")
         print("========================================")
-
-        if not new_jobs:
-
-            print(
-                "Keine neuen passenden Stellen."
-            )
-
-        else:
-
-            print(
-                f"{len(new_jobs)} neue Stelle(n) "
-                "gemeldet."
-            )
 
     except Exception as e:
 
@@ -945,4 +1199,6 @@ with sync_playwright() as p:
         browser.close()
 
         print()
-        print("Browser geschlossen.")
+        print(
+            "Browser geschlossen."
+        )
