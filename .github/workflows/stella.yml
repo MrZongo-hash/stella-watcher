@@ -1,4 +1,4 @@
-```yaml
+
 name: STELLA täglich prüfen
 
 on:
@@ -90,4 +90,3 @@ jobs:
             git push
 
           fi
-```
