@@ -1,4 +1,3 @@
-```python
 from playwright.sync_api import sync_playwright
 import json
 import os
@@ -1619,4 +1618,3 @@ with sync_playwright() as p:
         print(
             "Browser geschlossen."
         )
-```
