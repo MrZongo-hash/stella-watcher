@@ -256,38 +256,41 @@ def open_stella(page):
 
     print("Öffne STELLA...")
 
+    # Startseite laden, ohne auf vollständige Netzwerkruhe zu warten
     page.goto(
         START_URL,
-        wait_until="networkidle",
+        wait_until="domcontentloaded",
         timeout=60000
     )
 
     print("Startseite geladen.")
 
+    # Link zur STELLA-Suche suchen
     link = page.get_by_text(
         "zu den Stellen im System Stella NRW",
         exact=False
     ).first
 
+    link.wait_for(state="visible", timeout=30000)
     link.click()
 
-    page.wait_for_load_state(
-        "networkidle",
-        timeout=60000
-    )
-
-    print("Suchmaschine geöffnet.")
-
+    # Auf das tatsächlich benötigte Element der nächsten Seite warten
     fachleiter = page.get_by_text(
         "Stellen an Zentren für schulpraktische Lehrerausbildung/Fachleiterausschreibung",
         exact=False
     ).first
 
+    fachleiter.wait_for(state="visible", timeout=45000)
+
+    print("Suchmaschine geöffnet.")
+
+    # Fachleiter-Suche öffnen
     fachleiter.click()
 
+    # Warten, bis die Navigation bzw. der nächste Seitenzustand verarbeitet wurde
     page.wait_for_load_state(
-        "networkidle",
-        timeout=60000
+        "domcontentloaded",
+        timeout=30000
     )
 
     print("Fachleiter-Suche geöffnet.")
